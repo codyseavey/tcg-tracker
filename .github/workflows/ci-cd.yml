@@ -93,15 +93,52 @@ jobs:
           name: frontend-dist
           path: frontend/dist
 
+  build-mobile:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.24.0'
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Build Android APK
+        run: flutter build apk --release
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: mobile/build/app/outputs/flutter-apk/app-release.apk
+
   deploy:
     runs-on: [self-hosted, fedora]
-    needs: [build-backend, build-frontend, check-changes]
+    needs: [build-backend, build-frontend, build-mobile, check-changes]
     if: |
       always() &&
       github.ref == 'refs/heads/main' &&
       github.event_name == 'push' &&
       needs.build-backend.result == 'success' &&
-      needs.build-frontend.result == 'success'
+      needs.build-frontend.result == 'success' &&
+      needs.build-mobile.result == 'success'
     environment: production
     env:
       SERVER: "192.168.86.227"
