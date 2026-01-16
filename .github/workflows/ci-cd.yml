@@ -141,14 +141,14 @@ jobs:
 
       - name: Setup environment variables
         run: |
-          ssh $SERVER 'cat > /opt/tcg-tracker/config.env << EOF
+          ssh $SERVER "cat > $APP_DIR/config.env << 'EOF'
           DB_PATH=/opt/tcg-tracker/tcg_tracker.db
           PORT=8081
           FRONTEND_DIST_PATH=/opt/tcg-tracker/dist
           POKEMON_DATA_DIR=/opt/tcg-tracker/data
           POKEMON_PRICE_DAILY_LIMIT=100
-          EOF'
-          ssh $SERVER "sed -i 's/^[[:space:]]*//' /opt/tcg-tracker/config.env"
+          EOF"
+          ssh $SERVER "sed -i 's/^[[:space:]]*//' $APP_DIR/config.env"
 
       - name: Backup database (if exists)
         run: |
