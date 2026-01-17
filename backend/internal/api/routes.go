@@ -6,10 +6,11 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/codyseavey/tcg-tracker/backend/internal/api/handlers"
-	"github.com/codyseavey/tcg-tracker/backend/internal/services"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+
+	"github.com/codyseavey/tcg-tracker/backend/internal/api/handlers"
+	"github.com/codyseavey/tcg-tracker/backend/internal/services"
 )
 
 func SetupRouter(scryfallService *services.ScryfallService, pokemonService *services.PokemonHybridService, priceWorker *services.PriceWorker) *gin.Engine {

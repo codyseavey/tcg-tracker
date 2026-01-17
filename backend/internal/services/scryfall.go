@@ -28,20 +28,20 @@ func NewScryfallService() *ScryfallService {
 type scryfallSearchResponse struct {
 	Data       []scryfallCard `json:"data"`
 	Object     string         `json:"object"`
-	HasMore    bool           `json:"has_more"`
 	TotalCards int            `json:"total_cards"`
+	HasMore    bool           `json:"has_more"`
 }
 
 type scryfallCard struct {
 	ImageURIs    *scryfallImages `json:"image_uris"`
 	CardFaces    []scryfallFace  `json:"card_faces"`
+	Prices       scryfallPrices  `json:"prices"`
 	ID           string          `json:"id"`
 	Name         string          `json:"name"`
 	SetName      string          `json:"set_name"`
 	Set          string          `json:"set"`
 	CollectorNum string          `json:"collector_number"`
 	Rarity       string          `json:"rarity"`
-	Prices       scryfallPrices  `json:"prices"`
 }
 
 type scryfallImages struct {

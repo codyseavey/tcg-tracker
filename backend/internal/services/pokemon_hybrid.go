@@ -29,18 +29,18 @@ type PokemonHybridService struct {
 }
 
 type LocalPokemonCard struct {
-	Subtypes   []string `json:"subtypes"`
-	Types      []string `json:"types"`
-	ID         string   `json:"id"`
-	Name       string   `json:"name"`
-	Supertype  string   `json:"supertype"`
-	HP         string   `json:"hp"`
-	Number     string   `json:"number"`
-	Artist     string   `json:"artist"`
-	Rarity     string   `json:"rarity"`
-	FlavorText string   `json:"flavorText"`
-	SetID      string   // Populated from filename
-	Images     LocalCardImages
+	Subtypes   []string        `json:"subtypes"`
+	Types      []string        `json:"types"`
+	Images     LocalCardImages `json:"images"`
+	ID         string          `json:"id"`
+	Name       string          `json:"name"`
+	Supertype  string          `json:"supertype"`
+	HP         string          `json:"hp"`
+	Number     string          `json:"number"`
+	Artist     string          `json:"artist"`
+	Rarity     string          `json:"rarity"`
+	FlavorText string          `json:"flavorText"`
+	SetID      string          // Populated from filename
 }
 
 type LocalCardImages struct {

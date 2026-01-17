@@ -3,8 +3,9 @@ package handlers
 import (
 	"net/http"
 
-	"github.com/codyseavey/tcg-tracker/backend/internal/services"
 	"github.com/gin-gonic/gin"
+
+	"github.com/codyseavey/tcg-tracker/backend/internal/services"
 )
 
 type PriceHandler struct {

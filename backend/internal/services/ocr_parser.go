@@ -18,8 +18,8 @@ type OCRResult struct {
 	SetName        string   `json:"set_name"`    // e.g., "Vivid Voltage" if detected
 	HP             string   `json:"hp"`          // e.g., "170" from "HP 170"
 	Rarity         string   `json:"rarity"`      // if detected
-	IsFoil         bool     `json:"is_foil"`     // detected foil indicators
 	Confidence     float64  `json:"confidence"`  // 0-1 based on how much we extracted
+	IsFoil         bool     `json:"is_foil"`     // detected foil indicators
 }
 
 // Maximum allowed OCR text length to prevent regex DoS
