@@ -2,6 +2,8 @@ package database
 
 import (
 	"log"
+	"os"
+	"strings"
 
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -14,8 +16,23 @@ var DB *gorm.DB
 
 func Initialize(dbPath string) error {
 	var err error
-	DB, err = gorm.Open(sqlite.Open(dbPath), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+	logLevel := logger.Warn
+	if v := os.Getenv("GORM_LOG_LEVEL"); v != "" {
+		switch strings.ToLower(v) {
+		case "silent":
+			logLevel = logger.Silent
+		case "error":
+			logLevel = logger.Error
+		case "warn", "warning":
+			logLevel = logger.Warn
+		case "info":
+			logLevel = logger.Info
+		}
+	}
+
+	dialector := sqlite.Open(dbPath + "?_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(ON)")
+	DB, err = gorm.Open(dialector, &gorm.Config{
+		Logger: logger.Default.LogMode(logLevel),
 	})
 	if err != nil {
 		return err

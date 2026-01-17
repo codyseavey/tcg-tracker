@@ -274,6 +274,8 @@ jobs:
           PORT=8081
           FRONTEND_DIST_PATH=/opt/tcg-tracker/dist
           POKEMON_DATA_DIR=/opt/tcg-tracker/data
+          GIN_MODE=release
+          GORM_LOG_LEVEL=warn
           EOF"
           ssh $SERVER "sed -i 's/^[[:space:]]*//' $APP_DIR/config.env"
 

@@ -6,6 +6,10 @@ After=network.target
 # Load environment variables
 EnvironmentFile=/opt/tcg-tracker/config.env
 
+# Production defaults (can be overridden in config.env)
+Environment=GIN_MODE=release
+Environment=GORM_LOG_LEVEL=warn
+
 User=root
 Group=root
 
