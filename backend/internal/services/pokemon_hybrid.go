@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -21,11 +22,11 @@ import (
 const pokemonDataURL = "https://github.com/PokemonTCG/pokemon-tcg-data/archive/refs/heads/master.zip"
 
 type PokemonHybridService struct {
-	priceService *PokemonPriceTrackerService
-	sets         map[string]LocalSet
-	cardIndex    map[string][]int // name -> card indices for fast lookup
-	cards        []LocalPokemonCard
-	mu           sync.RWMutex
+	tcgdexService *TCGdexService
+	sets          map[string]LocalSet
+	cardIndex     map[string][]int // name -> card indices for fast lookup
+	cards         []LocalPokemonCard
+	mu            sync.RWMutex
 }
 
 type LocalPokemonCard struct {
@@ -56,12 +57,12 @@ type LocalSet struct {
 	Total       int    `json:"total"`
 }
 
-func NewPokemonHybridService(dataDir string, priceTrackerAPIKey string) (*PokemonHybridService, error) {
+func NewPokemonHybridService(dataDir string) (*PokemonHybridService, error) {
 	service := &PokemonHybridService{
-		cards:        make([]LocalPokemonCard, 0),
-		sets:         make(map[string]LocalSet),
-		cardIndex:    make(map[string][]int),
-		priceService: NewPokemonPriceTrackerService(priceTrackerAPIKey),
+		cards:         make([]LocalPokemonCard, 0),
+		sets:          make(map[string]LocalSet),
+		cardIndex:     make(map[string][]int),
+		tcgdexService: NewTCGdexService(),
 	}
 
 	if err := service.loadData(dataDir); err != nil {
@@ -152,43 +153,80 @@ func (s *PokemonHybridService) SearchCards(query string) (*models.CardSearchResu
 
 	queryLower := strings.ToLower(strings.TrimSpace(query))
 
-	// Find matching cards
-	matchedIndices := make(map[int]bool)
+	// Score cards based on match quality
+	type scoredMatch struct {
+		idx   int
+		score int // Higher = better match
+	}
+	scored := make([]scoredMatch, 0)
+	seen := make(map[int]bool)
 
-	// Exact name match first
-	if indices, ok := s.cardIndex[queryLower]; ok {
-		for _, idx := range indices {
-			matchedIndices[idx] = true
+	// First pass: Find all cards that contain the query in their name
+	for idx, card := range s.cards {
+		nameLower := strings.ToLower(card.Name)
+
+		score := 0
+
+		// Exact full name match (highest priority)
+		if nameLower == queryLower {
+			score = 1000
+		} else if strings.EqualFold(card.Name, query) {
+			score = 1000
+		} else if nameLower == queryLower+" v" || nameLower == queryLower+" vmax" || nameLower == queryLower+" vstar" || nameLower == queryLower+" ex" || nameLower == queryLower+" gx" {
+			// Pokemon variant match (e.g., searching "Charizard" matches "Charizard V")
+			score = 900
+		} else if strings.HasPrefix(nameLower, queryLower+" ") {
+			// Name starts with query followed by space (e.g., "Houndour" matches "Houndour ex")
+			score = 800
+		} else if strings.HasPrefix(nameLower, queryLower) {
+			// Name starts with query (e.g., "Hound" matches "Houndour")
+			score = 700
+		} else if strings.Contains(nameLower, " "+queryLower) || strings.HasSuffix(nameLower, "'s "+queryLower) {
+			// Query appears as a word in the name (e.g., "Team Magma's Houndour" contains "Houndour")
+			score = 600
+		} else if strings.Contains(nameLower, queryLower) {
+			// Query appears anywhere in name
+			score = 500
+		}
+
+		if score > 0 && !seen[idx] {
+			seen[idx] = true
+			scored = append(scored, scoredMatch{idx: idx, score: score})
 		}
 	}
 
-	// Partial match if not enough results
-	if len(matchedIndices) < 20 {
+	// Second pass: Check index for partial word matches (if not enough results)
+	if len(scored) < 50 {
 		for name, indices := range s.cardIndex {
-			if strings.Contains(name, queryLower) {
+			if strings.Contains(name, queryLower) || strings.Contains(queryLower, name) {
 				for _, idx := range indices {
-					matchedIndices[idx] = true
-					if len(matchedIndices) >= 50 {
-						break
+					if !seen[idx] {
+						seen[idx] = true
+						scored = append(scored, scoredMatch{idx: idx, score: 400})
 					}
 				}
 			}
-			if len(matchedIndices) >= 50 {
-				break
-			}
 		}
 	}
 
-	// Convert to cards
-	cards := make([]models.Card, 0, len(matchedIndices))
-	for idx := range matchedIndices {
-		if idx < len(s.cards) {
-			card := s.convertToCard(s.cards[idx])
-			cards = append(cards, card)
+	// Sort by score (descending), then by name for consistency
+	sort.Slice(scored, func(i, j int) bool {
+		if scored[i].score != scored[j].score {
+			return scored[i].score > scored[j].score
 		}
-		if len(cards) >= 20 {
-			break
-		}
+		return s.cards[scored[i].idx].Name < s.cards[scored[j].idx].Name
+	})
+
+	// Convert to cards (limit to 50 for performance)
+	maxResults := 50
+	if len(scored) < maxResults {
+		maxResults = len(scored)
+	}
+
+	cards := make([]models.Card, 0, maxResults)
+	for i := 0; i < maxResults; i++ {
+		card := s.convertToCard(s.cards[scored[i].idx])
+		cards = append(cards, card)
 	}
 
 	// Enrich with prices from PriceTracker (batch or individual)
@@ -196,8 +234,8 @@ func (s *PokemonHybridService) SearchCards(query string) (*models.CardSearchResu
 
 	return &models.CardSearchResult{
 		Cards:      cards,
-		TotalCount: len(matchedIndices),
-		HasMore:    len(matchedIndices) > 20,
+		TotalCount: len(scored),
+		HasMore:    len(scored) > maxResults,
 	}, nil
 }
 
@@ -205,8 +243,6 @@ func (s *PokemonHybridService) enrichWithPrices(cards []models.Card, _ string) {
 	db := database.GetDB()
 	cacheThreshold := 24 * time.Hour // Prices older than this are considered stale
 
-	// Only use cached prices - never block search on external API calls
-	// Background price worker will update uncached cards asynchronously
 	for i := range cards {
 		var cachedCard models.Card
 		if err := db.First(&cachedCard, "id = ?", cards[i].ID).Error; err == nil {
@@ -220,8 +256,28 @@ func (s *PokemonHybridService) enrichWithPrices(cards []models.Card, _ string) {
 				continue
 			}
 		}
-		// Mark as needing price update - background worker will handle it
-		cards[i].PriceSource = "pending"
+
+		// Fetch price from TCGdex (no rate limits)
+		priceCard, err := s.tcgdexService.GetCard(cards[i].ID)
+		if err != nil {
+			log.Printf("Failed to fetch price for %s: %v", cards[i].ID, err)
+			cards[i].PriceSource = "error"
+			continue
+		}
+
+		if priceCard != nil && (priceCard.PriceUSD > 0 || priceCard.PriceFoilUSD > 0) {
+			now := time.Now()
+			cards[i].PriceUSD = priceCard.PriceUSD
+			cards[i].PriceFoilUSD = priceCard.PriceFoilUSD
+			cards[i].PriceUpdatedAt = &now
+			cards[i].PriceSource = "tcgdex"
+
+			// Cache the price in database
+			cards[i].LastPriceCheck = &now
+			db.Save(&cards[i])
+		} else {
+			cards[i].PriceSource = "not_found"
+		}
 	}
 }
 
@@ -250,9 +306,26 @@ func (s *PokemonHybridService) GetCard(id string) (*models.Card, error) {
 				}
 			}
 
-			// No cached price or it's stale, mark as pending
-			// Save to database so background worker can find and update it
-			card.PriceSource = "pending"
+			// Fetch price from TCGdex (no rate limits)
+			priceCard, err := s.tcgdexService.GetCard(id)
+			if err != nil {
+				log.Printf("Failed to fetch price for %s: %v", id, err)
+				card.PriceSource = "error"
+				db.Save(&card)
+				return &card, nil
+			}
+
+			if priceCard != nil && (priceCard.PriceUSD > 0 || priceCard.PriceFoilUSD > 0) {
+				now := time.Now()
+				card.PriceUSD = priceCard.PriceUSD
+				card.PriceFoilUSD = priceCard.PriceFoilUSD
+				card.PriceUpdatedAt = &now
+				card.LastPriceCheck = &now
+				card.PriceSource = "tcgdex"
+			} else {
+				card.PriceSource = "not_found"
+			}
+
 			db.Save(&card)
 			return &card, nil
 		}
