@@ -17,7 +17,6 @@ const (
 )
 
 type CollectionItem struct {
-	Card      Card      `json:"card" gorm:"foreignKey:CardID"`
 	AddedAt   time.Time `json:"added_at"`
 	CardID    string    `json:"card_id" gorm:"not null;index"`
 	Notes     string    `json:"notes"`
@@ -25,6 +24,7 @@ type CollectionItem struct {
 	ID        uint      `json:"id" gorm:"primaryKey;autoIncrement"`
 	Quantity  int       `json:"quantity" gorm:"default:1"`
 	Foil      bool      `json:"foil" gorm:"default:false"`
+	Card      Card      `json:"card" gorm:"foreignKey:CardID"`
 }
 
 type CollectionStats struct {

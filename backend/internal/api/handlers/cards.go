@@ -5,10 +5,11 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/codyseavey/tcg-tracker/backend/internal/database"
 	"github.com/codyseavey/tcg-tracker/backend/internal/models"
 	"github.com/codyseavey/tcg-tracker/backend/internal/services"
-	"github.com/gin-gonic/gin"
 )
 
 type CardHandler struct {

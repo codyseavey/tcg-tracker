@@ -3,10 +3,11 @@ package database
 import (
 	"log"
 
-	"github.com/codyseavey/tcg-tracker/backend/internal/models"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 	"gorm.io/gorm/logger"
+
+	"github.com/codyseavey/tcg-tracker/backend/internal/models"
 )
 
 var DB *gorm.DB

@@ -21,10 +21,10 @@ const (
 )
 
 type PriceWorker struct {
-	mu             sync.RWMutex
 	pokemonService *PokemonHybridService
 	lastResetDate  time.Time
 	updateInterval time.Duration
+	mu             sync.RWMutex
 
 	// Rate limiting
 	dailyLimit    int

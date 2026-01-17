@@ -21,26 +21,26 @@ import (
 const pokemonDataURL = "https://github.com/PokemonTCG/pokemon-tcg-data/archive/refs/heads/master.zip"
 
 type PokemonHybridService struct {
-	mu           sync.RWMutex
-	cards        []LocalPokemonCard
+	priceService *PokemonPriceTrackerService
 	sets         map[string]LocalSet
 	cardIndex    map[string][]int // name -> card indices for fast lookup
-	priceService *PokemonPriceTrackerService
+	cards        []LocalPokemonCard
+	mu           sync.RWMutex
 }
 
 type LocalPokemonCard struct {
-	Subtypes   []string        `json:"subtypes"`
-	Types      []string        `json:"types"`
-	Images     LocalCardImages `json:"images"`
-	ID         string          `json:"id"`
-	Name       string          `json:"name"`
-	Supertype  string          `json:"supertype"`
-	HP         string          `json:"hp"`
-	Number     string          `json:"number"`
-	Artist     string          `json:"artist"`
-	Rarity     string          `json:"rarity"`
-	FlavorText string          `json:"flavorText"`
-	SetID      string          // Populated from filename
+	Subtypes   []string `json:"subtypes"`
+	Types      []string `json:"types"`
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	Supertype  string   `json:"supertype"`
+	HP         string   `json:"hp"`
+	Number     string   `json:"number"`
+	Artist     string   `json:"artist"`
+	Rarity     string   `json:"rarity"`
+	FlavorText string   `json:"flavorText"`
+	SetID      string   // Populated from filename
+	Images     LocalCardImages
 }
 
 type LocalCardImages struct {
