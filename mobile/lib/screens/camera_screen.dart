@@ -102,22 +102,30 @@ class _CameraScreenState extends State<CameraScreen> {
 
     try {
       final image = await _controller!.takePicture();
-      final lines = await _ocrService.extractTextFromImage(image.path);
 
-      if (lines.isEmpty) {
+      // Process image with OCR and image analysis in parallel
+      final ocrResult = await _ocrService.processImage(image.path);
+
+      if (ocrResult.textLines.isEmpty) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('No text detected in image')),
           );
         }
+        // Clean up temp image before returning
+        await File(image.path).delete();
         return;
       }
 
       // Send full OCR text to server for parsing (includes card number, set info)
-      final fullText = lines.join('\n');
+      final fullText = ocrResult.textLines.join('\n');
 
-      // Search for matching cards using identify endpoint
-      final scanResult = await _apiService.identifyCard(fullText, _selectedGame);
+      // Search for matching cards using identify endpoint, including image analysis
+      final scanResult = await _apiService.identifyCard(
+        fullText,
+        _selectedGame,
+        imageAnalysis: ocrResult.imageAnalysis,
+      );
 
       if (!mounted) return;
 

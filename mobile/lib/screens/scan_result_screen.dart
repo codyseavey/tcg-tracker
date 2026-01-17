@@ -23,18 +23,22 @@ class ScanResultScreen extends StatefulWidget {
 class _ScanResultScreenState extends State<ScanResultScreen> {
   late final ApiService _apiService;
   int _quantity = 1;
-  String _condition = 'NM';
+  late String _condition;
   late bool _foil;
   bool _isAdding = false;
 
-  final List<String> _conditions = ['M', 'NM', 'EX', 'GD', 'LP', 'PL', 'PR'];
+  // Condition codes: M=Mint, NM=Near Mint, LP=Lightly Played, MP=Moderately Played, HP=Heavily Played, D=Damaged
+  final List<String> _conditions = ['M', 'NM', 'LP', 'MP', 'HP', 'D'];
 
   @override
   void initState() {
     super.initState();
     _apiService = widget.apiService ?? ApiService();
-    // Pre-fill foil based on scan detection
+    // Pre-fill foil based on scan detection (text or image analysis)
     _foil = widget.scanMetadata?.isFoil ?? false;
+    // Pre-fill condition based on image analysis suggested condition
+    final suggested = widget.scanMetadata?.suggestedCondition;
+    _condition = (suggested != null && _conditions.contains(suggested)) ? suggested : 'NM';
   }
 
   Future<void> _addToCollection(CardModel card) async {
@@ -115,17 +119,34 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
                     ),
                   ],
                 ),
-                // Condition
+                // Condition with auto-detect indicator
                 Row(
                   children: [
                     const Text('Condition:'),
-                    const SizedBox(width: 16),
+                    if (widget.scanMetadata?.suggestedCondition != null) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: _getConditionColor(_condition),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Text(
+                          'Auto',
+                          style: TextStyle(fontSize: 10, color: Colors.white),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(width: 8),
                     Expanded(
                       child: DropdownButton<String>(
                         value: _condition,
                         isExpanded: true,
                         items: _conditions.map((c) {
-                          return DropdownMenuItem(value: c, child: Text(c));
+                          return DropdownMenuItem(
+                            value: c,
+                            child: Text('$c - ${_getConditionDescription(c)}'),
+                          );
                         }).toList(),
                         onChanged: (value) {
                           if (value != null) {
@@ -242,6 +263,21 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
                 color: Theme.of(context).colorScheme.onPrimaryContainer,
               ),
             ),
+            // Condition assessment display
+            if (meta.suggestedCondition != null) ...[
+              const SizedBox(height: 8),
+              _buildConditionIndicator(meta),
+            ],
+            // Foil confidence display
+            if (meta.foilConfidence != null && meta.foilConfidence! > 0) ...[
+              const SizedBox(height: 8),
+              _buildFoilConfidenceIndicator(meta),
+            ],
+            // Corner scores visualization
+            if (meta.cornerScores != null && meta.cornerScores!.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              _buildCornerScoresGrid(meta.cornerScores!),
+            ],
             if (meta.foilIndicators.isNotEmpty) ...[
               const SizedBox(height: 4),
               Wrap(
@@ -271,6 +307,161 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
         ),
       ),
     );
+  }
+
+  Widget _buildConditionIndicator(ScanMetadata meta) {
+    final condition = meta.suggestedCondition!;
+    final color = _getConditionColor(condition);
+    final description = _getConditionDescription(condition);
+
+    return Row(
+      children: [
+        Icon(Icons.verified, size: 16, color: color),
+        const SizedBox(width: 4),
+        Text(
+          'Suggested Condition: ',
+          style: TextStyle(
+            fontSize: 12,
+            color: Theme.of(context).colorScheme.onPrimaryContainer,
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            condition,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            description,
+            style: TextStyle(
+              fontSize: 11,
+              color: Theme.of(context).colorScheme.onPrimaryContainer.withValues(alpha: 0.7),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildFoilConfidenceIndicator(ScanMetadata meta) {
+    final confidence = meta.foilConfidence!;
+    final isHighConfidence = confidence >= 0.7;
+
+    return Row(
+      children: [
+        Icon(
+          Icons.auto_awesome,
+          size: 16,
+          color: isHighConfidence ? Colors.amber : Colors.grey,
+        ),
+        const SizedBox(width: 4),
+        Text(
+          'Foil Detection: ',
+          style: TextStyle(
+            fontSize: 12,
+            color: Theme.of(context).colorScheme.onPrimaryContainer,
+          ),
+        ),
+        Container(
+          width: 60,
+          height: 8,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(4),
+            color: Colors.grey.shade300,
+          ),
+          child: FractionallySizedBox(
+            alignment: Alignment.centerLeft,
+            widthFactor: confidence,
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(4),
+                color: isHighConfidence ? Colors.amber : Colors.grey,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 4),
+        Text(
+          '${(confidence * 100).toInt()}%',
+          style: TextStyle(
+            fontSize: 11,
+            color: Theme.of(context).colorScheme.onPrimaryContainer,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildCornerScoresGrid(Map<String, double> cornerScores) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Edge Whitening Detection:',
+          style: TextStyle(
+            fontSize: 12,
+            color: Theme.of(context).colorScheme.onPrimaryContainer,
+          ),
+        ),
+        const SizedBox(height: 4),
+        SizedBox(
+          width: 80,
+          height: 80,
+          child: CustomPaint(
+            painter: CornerScoresPainter(cornerScores),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Color _getConditionColor(String condition) {
+    switch (condition) {
+      case 'M':
+        return Colors.blue;
+      case 'NM':
+        return Colors.green;
+      case 'LP':
+        return Colors.lightGreen;
+      case 'MP':
+        return Colors.orange;
+      case 'HP':
+        return Colors.deepOrange;
+      case 'D':
+        return Colors.red;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  String _getConditionDescription(String condition) {
+    switch (condition) {
+      case 'M':
+        return 'Mint';
+      case 'NM':
+        return 'Near Mint';
+      case 'LP':
+        return 'Lightly Played';
+      case 'MP':
+        return 'Moderately Played';
+      case 'HP':
+        return 'Heavily Played';
+      case 'D':
+        return 'Damaged';
+      default:
+        return condition;
+    }
   }
 
   Color _getConfidenceColor(BuildContext context, double confidence) {
@@ -333,4 +524,44 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
             ),
     );
   }
+}
+
+/// Custom painter for visualizing corner whitening scores
+class CornerScoresPainter extends CustomPainter {
+  final Map<String, double> cornerScores;
+
+  CornerScoresPainter(this.cornerScores);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()..style = PaintingStyle.fill;
+    final borderPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..color = Colors.grey
+      ..strokeWidth = 1;
+
+    // Draw card outline
+    final cardRect = Rect.fromLTWH(0, 0, size.width, size.height);
+    canvas.drawRect(cardRect, borderPaint);
+
+    final cornerSize = size.width * 0.25;
+
+    // Draw corners with color based on whitening score
+    _drawCorner(canvas, paint, 0, 0, cornerSize, cornerScores['topLeft'] ?? 0);
+    _drawCorner(
+        canvas, paint, size.width - cornerSize, 0, cornerSize, cornerScores['topRight'] ?? 0);
+    _drawCorner(canvas, paint, 0, size.height - cornerSize, cornerSize,
+        cornerScores['bottomLeft'] ?? 0);
+    _drawCorner(canvas, paint, size.width - cornerSize, size.height - cornerSize, cornerSize,
+        cornerScores['bottomRight'] ?? 0);
+  }
+
+  void _drawCorner(Canvas canvas, Paint paint, double x, double y, double size, double score) {
+    // Green = good (low whitening), Red = bad (high whitening)
+    paint.color = Color.lerp(Colors.green, Colors.red, score) ?? Colors.grey;
+    canvas.drawRect(Rect.fromLTWH(x, y, size, size), paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
 }

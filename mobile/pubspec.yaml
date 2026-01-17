@@ -40,6 +40,7 @@ dependencies:
   provider: ^6.1.2
   cached_network_image: ^3.4.1
   intl: ^0.20.2
+  image: ^4.3.0                    # Image analysis for foil/condition detection
 
 dev_dependencies:
   flutter_test:

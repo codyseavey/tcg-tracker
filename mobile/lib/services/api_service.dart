@@ -5,6 +5,7 @@ import '../models/card.dart';
 import '../models/collection_item.dart';
 import '../models/collection_stats.dart';
 import '../models/price_status.dart';
+import 'image_analysis_service.dart';
 
 class ApiService {
   static const String _serverUrlKey = 'server_url';
@@ -51,14 +52,28 @@ class ApiService {
     }
   }
 
-  Future<ScanResult> identifyCard(String text, String game) async {
+  Future<ScanResult> identifyCard(
+    String text,
+    String game, {
+    ImageAnalysisResult? imageAnalysis,
+  }) async {
     final serverUrl = await getServerUrl();
     final uri = Uri.parse('$serverUrl/api/cards/identify');
+
+    final body = <String, dynamic>{
+      'text': text,
+      'game': game,
+    };
+
+    // Include image analysis if provided
+    if (imageAnalysis != null) {
+      body['image_analysis'] = imageAnalysis.toJson();
+    }
 
     final response = await _httpClient.post(
       uri,
       headers: {'Content-Type': 'application/json'},
-      body: json.encode({'text': text, 'game': game}),
+      body: json.encode(body),
     ).timeout(
       const Duration(seconds: 35),
       onTimeout: () => throw Exception('Request timed out'),

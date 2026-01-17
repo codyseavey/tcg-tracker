@@ -7,33 +7,177 @@ import (
 
 // OCRResult contains parsed information from OCR text
 type OCRResult struct {
-	FoilIndicators []string `json:"foil_indicators"` // what triggered foil detection
-	AllLines       []string `json:"all_lines"`
-	ConditionHints []string `json:"condition_hints"` // hints about card condition
-	RawText        string   `json:"raw_text"`
-	CardName       string   `json:"card_name"`
-	CardNumber     string   `json:"card_number"` // e.g., "25" from "025/185"
-	SetTotal       string   `json:"set_total"`   // e.g., "185" from "025/185"
-	SetCode        string   `json:"set_code"`    // e.g., "SWSH4" if detected
-	SetName        string   `json:"set_name"`    // e.g., "Vivid Voltage" if detected
-	HP             string   `json:"hp"`          // e.g., "170" from "HP 170"
-	Rarity         string   `json:"rarity"`      // if detected
-	Confidence     float64  `json:"confidence"`  // 0-1 based on how much we extracted
-	IsFoil         bool     `json:"is_foil"`     // detected foil indicators
+	FoilIndicators     []string           `json:"foil_indicators"`      // what triggered foil detection
+	AllLines           []string           `json:"all_lines"`
+	ConditionHints     []string           `json:"condition_hints"`      // hints about card condition
+	RawText            string             `json:"raw_text"`
+	CardName           string             `json:"card_name"`
+	CardNumber         string             `json:"card_number"`          // e.g., "25" from "025/185"
+	SetTotal           string             `json:"set_total"`            // e.g., "185" from "025/185"
+	SetCode            string             `json:"set_code"`             // e.g., "SWSH4" if detected
+	SetName            string             `json:"set_name"`             // e.g., "Vivid Voltage" if detected
+	HP                 string             `json:"hp"`                   // e.g., "170" from "HP 170"
+	Rarity             string             `json:"rarity"`               // if detected
+	Confidence         float64            `json:"confidence"`           // 0-1 based on how much we extracted
+	IsFoil             bool               `json:"is_foil"`              // detected foil indicators
+	SuggestedCondition string             `json:"suggested_condition"`  // from image analysis
+	EdgeWhiteningScore float64            `json:"edge_whitening_score"` // from image analysis
+	CornerScores       map[string]float64 `json:"corner_scores"`        // from image analysis
+	FoilConfidence     float64            `json:"foil_confidence"`      // from image analysis
+}
+
+// ImageAnalysis contains results from client-side image analysis
+type ImageAnalysis struct {
+	IsFoilDetected     bool               `json:"is_foil_detected"`
+	FoilConfidence     float64            `json:"foil_confidence"`
+	SuggestedCondition string             `json:"suggested_condition"`
+	EdgeWhiteningScore float64            `json:"edge_whitening_score"`
+	CornerScores       map[string]float64 `json:"corner_scores"`
 }
 
 // Maximum allowed OCR text length to prevent regex DoS
 const maxOCRTextLength = 10000
 
+// Pokemon TCG set name to set code mapping
+var pokemonSetNameToCode = map[string]string{
+	// Scarlet & Violet Era
+	"SCARLET & VIOLET":          "sv1",
+	"SCARLET AND VIOLET":        "sv1",
+	"PALDEA EVOLVED":            "sv2",
+	"OBSIDIAN FLAMES":           "sv3",
+	"151":                       "sv3pt5",
+	"MEW":                       "sv3pt5",
+	"PARADOX RIFT":              "sv4",
+	"PALDEAN FATES":             "sv4pt5",
+	"TEMPORAL FORCES":           "sv5",
+	"TWILIGHT MASQUERADE":       "sv6",
+	"SHROUDED FABLE":            "sv6pt5",
+	"STELLAR CROWN":             "sv7",
+	"SURGING SPARKS":            "sv8",
+	"PRISMATIC EVOLUTIONS":      "sv8pt5",
+	"JOURNEY TOGETHER":          "sv9",
+
+	// Sword & Shield Era
+	"SWORD & SHIELD":            "swsh1",
+	"SWORD AND SHIELD":          "swsh1",
+	"REBEL CLASH":               "swsh2",
+	"DARKNESS ABLAZE":           "swsh3",
+	"CHAMPION'S PATH":           "swsh3pt5",
+	"CHAMPIONS PATH":            "swsh3pt5",
+	"VIVID VOLTAGE":             "swsh4",
+	"SHINING FATES":             "swsh4pt5",
+	"BATTLE STYLES":             "swsh5",
+	"CHILLING REIGN":            "swsh6",
+	"EVOLVING SKIES":            "swsh7",
+	"CELEBRATIONS":              "cel25",
+	"FUSION STRIKE":             "swsh8",
+	"BRILLIANT STARS":           "swsh9",
+	"ASTRAL RADIANCE":           "swsh10",
+	"POKEMON GO":                "pgo",
+	"LOST ORIGIN":               "swsh11",
+	"SILVER TEMPEST":            "swsh12",
+	"CROWN ZENITH":              "swsh12pt5",
+
+	// Sun & Moon Era
+	"SUN & MOON":                "sm1",
+	"SUN AND MOON":              "sm1",
+	"GUARDIANS RISING":          "sm2",
+	"BURNING SHADOWS":           "sm3",
+	"SHINING LEGENDS":           "sm3pt5",
+	"CRIMSON INVASION":          "sm4",
+	"ULTRA PRISM":               "sm5",
+	"FORBIDDEN LIGHT":           "sm6",
+	"CELESTIAL STORM":           "sm7",
+	"DRAGON MAJESTY":            "sm7pt5",
+	"LOST THUNDER":              "sm8",
+	"TEAM UP":                   "sm9",
+	"DETECTIVE PIKACHU":         "det1",
+	"UNBROKEN BONDS":            "sm10",
+	"UNIFIED MINDS":             "sm11",
+	"HIDDEN FATES":              "sm11pt5",
+	"COSMIC ECLIPSE":            "sm12",
+
+	// XY Era
+	"XY":                        "xy1",
+	"FLASHFIRE":                 "xy2",
+	"FURIOUS FISTS":             "xy3",
+	"PHANTOM FORCES":            "xy4",
+	"PRIMAL CLASH":              "xy5",
+	"ROARING SKIES":             "xy6",
+	"ANCIENT ORIGINS":           "xy7",
+	"BREAKTHROUGH":              "xy8",
+	"BREAKPOINT":                "xy9",
+	"FATES COLLIDE":             "xy10",
+	"STEAM SIEGE":               "xy11",
+	"EVOLUTIONS":                "xy12",
+
+	// Black & White Era
+	"BLACK & WHITE":             "bw1",
+	"BLACK AND WHITE":           "bw1",
+	"EMERGING POWERS":           "bw2",
+	"NOBLE VICTORIES":           "bw3",
+	"NEXT DESTINIES":            "bw4",
+	"DARK EXPLORERS":            "bw5",
+	"DRAGONS EXALTED":           "bw6",
+	"BOUNDARIES CROSSED":        "bw7",
+	"PLASMA STORM":              "bw8",
+	"PLASMA FREEZE":             "bw9",
+	"PLASMA BLAST":              "bw10",
+	"LEGENDARY TREASURES":       "bw11",
+}
+
+// Pokemon TCG set total to possible set codes mapping
+// When a card has XX/YYY format, we can sometimes infer the set from the total
+// Note: Some totals are shared between sets, those are listed with multiple options
+var pokemonSetTotalToCode = map[string][]string{
+	// Scarlet & Violet Era - unique totals
+	"193": {"sv2"},      // Paldea Evolved (193 cards)
+	"197": {"sv3"},      // Obsidian Flames (197 cards)
+	"165": {"sv3pt5"},   // 151 (165 cards including secrets)
+	"182": {"sv4"},      // Paradox Rift (182 cards)
+	"091": {"sv4pt5"},   // Paldean Fates (91 cards in main set)
+	"218": {"sv5"},      // Temporal Forces (218 cards)
+	"167": {"sv6"},      // Twilight Masquerade (167 cards)
+	"064": {"sv6pt5"},   // Shrouded Fable (64 cards)
+	"175": {"sv7"},      // Stellar Crown (175 cards)
+	"191": {"sv8"},      // Surging Sparks (191 cards)
+
+	// Sword & Shield Era - unique totals
+	"202": {"swsh1"},    // Sword & Shield base
+	"192": {"swsh2"},    // Rebel Clash
+	"073": {"swsh3pt5"}, // Champion's Path
+	"185": {"swsh4"},    // Vivid Voltage
+	"072": {"swsh4pt5"}, // Shining Fates main set
+	"163": {"swsh5"},    // Battle Styles
+	"203": {"swsh7"},    // Evolving Skies
+	"025": {"cel25"},    // Celebrations main
+	"264": {"swsh8"},    // Fusion Strike
+	"172": {"swsh9"},    // Brilliant Stars
+	"078": {"pgo"},      // Pokemon GO
+	"196": {"swsh11"},   // Lost Origin
+	"195": {"swsh12"},   // Silver Tempest
+	"159": {"swsh12pt5"}, // Crown Zenith main set
+
+	// Shared totals (multiple possible sets) - prefer newer set
+	"198": {"sv1", "swsh6"},          // SV1 or Chilling Reign
+	"189": {"swsh10", "swsh3"},       // Astral Radiance or Darkness Ablaze
+}
+
 // ParseOCRText extracts card information from OCR text
 func ParseOCRText(text string, game string) *OCRResult {
+	return ParseOCRTextWithAnalysis(text, game, nil)
+}
+
+// ParseOCRTextWithAnalysis extracts card information from OCR text and incorporates image analysis
+func ParseOCRTextWithAnalysis(text string, game string, imageAnalysis *ImageAnalysis) *OCRResult {
 	// Truncate overly long text to prevent regex DoS
 	if len(text) > maxOCRTextLength {
 		text = text[:maxOCRTextLength]
 	}
 
 	result := &OCRResult{
-		RawText: text,
+		RawText:      text,
+		CornerScores: make(map[string]float64),
 	}
 
 	// Split into lines and clean
@@ -53,10 +197,36 @@ func ParseOCRText(text string, game string) *OCRResult {
 		parseMTGOCR(result)
 	}
 
+	// Incorporate image analysis if provided
+	if imageAnalysis != nil {
+		applyImageAnalysis(result, imageAnalysis)
+	}
+
 	// Calculate confidence based on what we extracted
 	result.Confidence = calculateConfidence(result)
 
 	return result
+}
+
+// applyImageAnalysis incorporates client-side image analysis into OCR results
+func applyImageAnalysis(result *OCRResult, analysis *ImageAnalysis) {
+	// Copy condition assessment data
+	result.SuggestedCondition = analysis.SuggestedCondition
+	result.EdgeWhiteningScore = analysis.EdgeWhiteningScore
+	result.CornerScores = analysis.CornerScores
+	result.FoilConfidence = analysis.FoilConfidence
+
+	// Combine foil detection: prefer image analysis if high confidence
+	if analysis.FoilConfidence >= 0.7 {
+		result.IsFoil = analysis.IsFoilDetected
+		if analysis.IsFoilDetected {
+			result.FoilIndicators = append(result.FoilIndicators, "Image analysis detected foil")
+		}
+	} else if analysis.IsFoilDetected && !result.IsFoil {
+		// If text didn't detect foil but image did (lower confidence), still flag it
+		result.IsFoil = true
+		result.FoilIndicators = append(result.FoilIndicators, "Image analysis suggests foil (low confidence)")
+	}
 }
 
 func parsePokemonOCR(result *OCRResult) {
@@ -102,6 +272,16 @@ func parsePokemonOCR(result *OCRResult) {
 	setCodeRegex := regexp.MustCompile(`\b(SWSH\d{1,2}|SV\d{1,2}|XY\d{1,2}|SM\d{1,2}|BW\d{1,2}|DP\d?|EX\d{1,2}|RS|LC|BS\d?|PGO|CEL25|PR-SW|PR-SV)\b`)
 	if matches := setCodeRegex.FindStringSubmatch(upperText); len(matches) >= 1 {
 		result.SetCode = strings.ToLower(matches[0])
+	}
+
+	// Try to detect set from set name if no set code found
+	if result.SetCode == "" {
+		detectSetFromName(result, upperText)
+	}
+
+	// Try to detect set from card number total if still no set code
+	if result.SetCode == "" {
+		detectSetFromTotal(result)
 	}
 
 	// Detect foil/holo indicators
@@ -389,4 +569,63 @@ func calculateConfidence(result *OCRResult) float64 {
 	}
 
 	return score
+}
+
+// detectSetFromName tries to detect set code from set name in OCR text
+func detectSetFromName(result *OCRResult, upperText string) {
+	// Check for set names in the text (longest matches first for accuracy)
+	// Sort by length descending to match longer names first
+	type setMatch struct {
+		name string
+		code string
+	}
+	matches := []setMatch{}
+
+	for name, code := range pokemonSetNameToCode {
+		if strings.Contains(upperText, name) {
+			matches = append(matches, setMatch{name: name, code: code})
+		}
+	}
+
+	// Find the longest match (most specific)
+	if len(matches) > 0 {
+		longest := matches[0]
+		for _, m := range matches[1:] {
+			if len(m.name) > len(longest.name) {
+				longest = m
+			}
+		}
+		result.SetCode = longest.code
+		result.SetName = longest.name
+	}
+}
+
+// detectSetFromTotal tries to infer set code from card set total (e.g., /185 -> Vivid Voltage)
+func detectSetFromTotal(result *OCRResult) {
+	if result.SetTotal == "" || result.SetCode != "" {
+		return
+	}
+
+	// Normalize the set total (remove leading zeros for matching)
+	normalizedTotal := strings.TrimLeft(result.SetTotal, "0")
+	if normalizedTotal == "" {
+		normalizedTotal = "0"
+	}
+
+	// Also try with the original (padded) version
+	if possibleSets, ok := pokemonSetTotalToCode[result.SetTotal]; ok {
+		// If there's only one possible set, use it
+		if len(possibleSets) == 1 {
+			result.SetCode = possibleSets[0]
+		}
+		// Otherwise we can't be certain, but could hint at possibilities
+		return
+	}
+
+	// Try with normalized total (without leading zeros)
+	if possibleSets, ok := pokemonSetTotalToCode[normalizedTotal]; ok {
+		if len(possibleSets) == 1 {
+			result.SetCode = possibleSets[0]
+		}
+	}
 }

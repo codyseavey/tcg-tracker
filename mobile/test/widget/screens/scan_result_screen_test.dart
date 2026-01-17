@@ -258,7 +258,8 @@ void main() {
           await tester.pumpAndSettle();
 
           expect(find.text('Condition:'), findsOneWidget);
-          expect(find.text('NM'), findsOneWidget);
+          // Dropdown now shows condition code with description
+          expect(find.text('NM - Near Mint'), findsOneWidget);
         });
       });
     });

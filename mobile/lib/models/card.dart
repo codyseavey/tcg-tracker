@@ -82,6 +82,11 @@ class ScanMetadata {
   final List<String> foilIndicators;
   final double confidence;
   final List<String> conditionHints;
+  // Image analysis fields
+  final String? suggestedCondition;
+  final double? edgeWhiteningScore;
+  final Map<String, double>? cornerScores;
+  final double? foilConfidence;
 
   ScanMetadata({
     this.cardName,
@@ -95,6 +100,10 @@ class ScanMetadata {
     this.foilIndicators = const [],
     this.confidence = 0.0,
     this.conditionHints = const [],
+    this.suggestedCondition,
+    this.edgeWhiteningScore,
+    this.cornerScores,
+    this.foilConfidence,
   });
 
   factory ScanMetadata.fromJson(Map<String, dynamic> json) {
@@ -116,6 +125,12 @@ class ScanMetadata {
               ?.map((e) => e.toString())
               .toList() ??
           [],
+      suggestedCondition: json['suggested_condition'],
+      edgeWhiteningScore: (json['edge_whitening_score'] as num?)?.toDouble(),
+      cornerScores: (json['corner_scores'] as Map<String, dynamic>?)?.map(
+        (key, value) => MapEntry(key, (value as num).toDouble()),
+      ),
+      foilConfidence: (json['foil_confidence'] as num?)?.toDouble(),
     );
   }
 
@@ -135,10 +150,25 @@ class ScanMetadata {
       parts.add(rarity!);
     }
     if (isFoil) {
-      parts.add('Foil detected');
+      final confPct = foilConfidence != null
+          ? ' (${(foilConfidence! * 100).toInt()}%)'
+          : '';
+      parts.add('Foil detected$confPct');
+    }
+    if (suggestedCondition != null) {
+      parts.add('Condition: $suggestedCondition');
     }
     return parts.isEmpty ? 'No details detected' : parts.join(' • ');
   }
+
+  /// Returns true if image analysis detected foil with high confidence
+  bool get hasHighConfidenceFoil =>
+      foilConfidence != null && foilConfidence! >= 0.7;
+
+  /// Returns true if condition assessment suggests wear
+  bool get hasConditionIssues =>
+      suggestedCondition != null &&
+      (suggestedCondition == 'MP' || suggestedCondition == 'HP');
 }
 
 /// Result from card identification (OCR scan)

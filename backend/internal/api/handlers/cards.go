@@ -108,8 +108,9 @@ func (h *CardHandler) GetCard(c *gin.Context) {
 
 func (h *CardHandler) IdentifyCard(c *gin.Context) {
 	var req struct {
-		Text string `json:"text" binding:"required"`
-		Game string `json:"game"`
+		Text          string                  `json:"text" binding:"required"`
+		Game          string                  `json:"game"`
+		ImageAnalysis *services.ImageAnalysis `json:"image_analysis"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -117,8 +118,8 @@ func (h *CardHandler) IdentifyCard(c *gin.Context) {
 		return
 	}
 
-	// Parse OCR text to extract card details
-	parsed := services.ParseOCRText(req.Text, req.Game)
+	// Parse OCR text to extract card details, incorporating image analysis if provided
+	parsed := services.ParseOCRTextWithAnalysis(req.Text, req.Game, req.ImageAnalysis)
 
 	// Use card name for search (fall back to raw text if no name extracted)
 	searchQuery := parsed.CardName
@@ -171,17 +172,21 @@ func (h *CardHandler) IdentifyCard(c *gin.Context) {
 		"total_count": result.TotalCount,
 		"has_more":    result.HasMore,
 		"parsed": gin.H{
-			"card_name":       parsed.CardName,
-			"card_number":     parsed.CardNumber,
-			"set_total":       parsed.SetTotal,
-			"set_code":        parsed.SetCode,
-			"set_name":        parsed.SetName,
-			"hp":              parsed.HP,
-			"rarity":          parsed.Rarity,
-			"is_foil":         parsed.IsFoil,
-			"foil_indicators": parsed.FoilIndicators,
-			"confidence":      parsed.Confidence,
-			"condition_hints": parsed.ConditionHints,
+			"card_name":           parsed.CardName,
+			"card_number":         parsed.CardNumber,
+			"set_total":           parsed.SetTotal,
+			"set_code":            parsed.SetCode,
+			"set_name":            parsed.SetName,
+			"hp":                  parsed.HP,
+			"rarity":              parsed.Rarity,
+			"is_foil":             parsed.IsFoil,
+			"foil_indicators":     parsed.FoilIndicators,
+			"confidence":          parsed.Confidence,
+			"condition_hints":     parsed.ConditionHints,
+			"suggested_condition": parsed.SuggestedCondition,
+			"edge_whitening_score": parsed.EdgeWhiteningScore,
+			"corner_scores":       parsed.CornerScores,
+			"foil_confidence":     parsed.FoilConfidence,
 		},
 	})
 }
