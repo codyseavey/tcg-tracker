@@ -20,6 +20,7 @@ const card = computed(() => props.item.card || props.item)
 const quantity = ref(props.item.quantity || 1)
 const condition = ref(props.item.condition || 'NM')
 const foil = ref(props.item.foil || false)
+const firstEdition = ref(props.item.first_edition || false)
 const refreshingPrice = ref(false)
 const priceError = ref(null)
 
@@ -70,7 +71,8 @@ const handleAdd = () => {
     cardId: card.value.id,
     quantity: quantity.value,
     condition: condition.value,
-    foil: foil.value
+    foil: foil.value,
+    firstEdition: firstEdition.value
   })
 }
 
@@ -79,7 +81,8 @@ const handleUpdate = () => {
     id: props.item.id,
     quantity: quantity.value,
     condition: condition.value,
-    foil: foil.value
+    foil: foil.value,
+    firstEdition: firstEdition.value
   })
 }
 
@@ -204,6 +207,15 @@ const handleRemove = () => {
                 class="rounded border-gray-300 text-blue-600 mr-2"
               />
               <label :for="'foil-' + card.id" class="text-sm font-medium text-gray-700">Foil</label>
+            </div>
+            <div class="flex items-center">
+              <input
+                v-model="firstEdition"
+                type="checkbox"
+                :id="'first-edition-' + card.id"
+                class="rounded border-gray-300 text-amber-600 mr-2"
+              />
+              <label :for="'first-edition-' + card.id" class="text-sm font-medium text-gray-700">1st Edition</label>
             </div>
           </div>
 

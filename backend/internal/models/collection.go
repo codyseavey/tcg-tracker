@@ -17,14 +17,15 @@ const (
 )
 
 type CollectionItem struct {
-	Card      Card      `json:"card" gorm:"foreignKey:CardID"`
-	CardID    string    `json:"card_id" gorm:"not null;index"`
-	Notes     string    `json:"notes"`
-	Condition Condition `json:"condition" gorm:"default:'NM'"`
-	AddedAt   time.Time `json:"added_at"`
-	ID        uint      `json:"id" gorm:"primaryKey;autoIncrement"`
-	Quantity  int       `json:"quantity" gorm:"default:1"`
-	Foil      bool      `json:"foil" gorm:"default:false"`
+	Card         Card      `json:"card" gorm:"foreignKey:CardID"`
+	CardID       string    `json:"card_id" gorm:"not null;index"`
+	Notes        string    `json:"notes"`
+	Condition    Condition `json:"condition" gorm:"default:'NM'"`
+	AddedAt      time.Time `json:"added_at"`
+	ID           uint      `json:"id" gorm:"primaryKey;autoIncrement"`
+	Quantity     int       `json:"quantity" gorm:"default:1"`
+	Foil         bool      `json:"foil" gorm:"default:false"`
+	FirstEdition bool      `json:"first_edition" gorm:"default:false"`
 }
 
 type CollectionStats struct {
@@ -38,16 +39,18 @@ type CollectionStats struct {
 }
 
 type AddToCollectionRequest struct {
-	CardID    string    `json:"card_id" binding:"required"`
-	Notes     string    `json:"notes"`
-	Condition Condition `json:"condition"`
-	Quantity  int       `json:"quantity"`
-	Foil      bool      `json:"foil"`
+	CardID       string    `json:"card_id" binding:"required"`
+	Notes        string    `json:"notes"`
+	Condition    Condition `json:"condition"`
+	Quantity     int       `json:"quantity"`
+	Foil         bool      `json:"foil"`
+	FirstEdition bool      `json:"first_edition"`
 }
 
 type UpdateCollectionRequest struct {
-	Quantity  *int       `json:"quantity"`
-	Condition *Condition `json:"condition"`
-	Foil      *bool      `json:"foil"`
-	Notes     *string    `json:"notes"`
+	Quantity     *int       `json:"quantity"`
+	Condition    *Condition `json:"condition"`
+	Foil         *bool      `json:"foil"`
+	Notes        *string    `json:"notes"`
+	FirstEdition *bool      `json:"first_edition"`
 }

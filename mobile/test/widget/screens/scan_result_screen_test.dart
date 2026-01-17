@@ -209,9 +209,11 @@ void main() {
           await tester.tap(find.text('Charizard VMAX'));
           await tester.pumpAndSettle();
 
-          // Find the Switch in SwitchListTile and verify it's on
-          final switchWidget = tester.widget<Switch>(find.byType(Switch));
-          expect(switchWidget.value, isTrue);
+          // Find the first Switch (Foil) in SwitchListTile and verify it's on
+          // Note: There are now two Switches (Foil and First Edition)
+          final switchWidgets = tester.widgetList<Switch>(find.byType(Switch)).toList();
+          expect(switchWidgets.length, 2); // Foil and First Edition
+          expect(switchWidgets[0].value, isTrue); // First switch is Foil
         });
       });
 

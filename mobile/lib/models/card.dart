@@ -87,6 +87,9 @@ class ScanMetadata {
   final double? edgeWhiteningScore;
   final Map<String, double>? cornerScores;
   final double? foilConfidence;
+  // First edition detection
+  final bool isFirstEdition;
+  final List<String> firstEdIndicators;
 
   ScanMetadata({
     this.cardName,
@@ -104,6 +107,8 @@ class ScanMetadata {
     this.edgeWhiteningScore,
     this.cornerScores,
     this.foilConfidence,
+    this.isFirstEdition = false,
+    this.firstEdIndicators = const [],
   });
 
   factory ScanMetadata.fromJson(Map<String, dynamic> json) {
@@ -131,6 +136,11 @@ class ScanMetadata {
         (key, value) => MapEntry(key, (value as num).toDouble()),
       ),
       foilConfidence: (json['foil_confidence'] as num?)?.toDouble(),
+      isFirstEdition: json['is_first_edition'] ?? false,
+      firstEdIndicators: (json['first_ed_indicators'] as List<dynamic>?)
+              ?.map((e) => e.toString())
+              .toList() ??
+          [],
     );
   }
 
@@ -148,6 +158,9 @@ class ScanMetadata {
     }
     if (rarity != null && rarity!.isNotEmpty) {
       parts.add(rarity!);
+    }
+    if (isFirstEdition) {
+      parts.add('1st Edition');
     }
     if (isFoil) {
       final confPct = foilConfidence != null

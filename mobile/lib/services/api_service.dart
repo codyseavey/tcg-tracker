@@ -123,6 +123,7 @@ class ApiService {
     int quantity = 1,
     String condition = 'NM',
     bool foil = false,
+    bool firstEdition = false,
   }) async {
     final serverUrl = await getServerUrl();
     final uri = Uri.parse('$serverUrl/api/collection');
@@ -135,6 +136,7 @@ class ApiService {
         'quantity': quantity,
         'condition': condition,
         'foil': foil,
+        'first_edition': firstEdition,
       }),
     ).timeout(
       const Duration(seconds: 35),
@@ -197,6 +199,7 @@ class ApiService {
     int? quantity,
     String? condition,
     bool? foil,
+    bool? firstEdition,
     String? notes,
   }) async {
     final serverUrl = await getServerUrl();
@@ -206,6 +209,7 @@ class ApiService {
     if (quantity != null) body['quantity'] = quantity;
     if (condition != null) body['condition'] = condition;
     if (foil != null) body['foil'] = foil;
+    if (firstEdition != null) body['first_edition'] = firstEdition;
     if (notes != null) body['notes'] = notes;
 
     final response = await _httpClient.put(

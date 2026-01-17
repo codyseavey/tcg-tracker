@@ -286,7 +286,7 @@ func TestIdentifyCardParsing(t *testing.T) {
 			expectedName:    "Charizard VMAX",
 			expectedNumber:  "20",
 			expectedSetCode: "swsh3",
-			expectedIsFoil:  true,
+			expectedIsFoil:  false, // Conservative: VMAX no longer auto-triggers foil
 			minConfidence:   0.9,
 		},
 		{
@@ -295,7 +295,7 @@ func TestIdentifyCardParsing(t *testing.T) {
 			game:           "pokemon",
 			expectedName:   "Umbreon VMAX",
 			expectedNumber: "TG17",
-			expectedIsFoil: true,
+			expectedIsFoil: false, // Conservative: VMAX no longer auto-triggers foil
 			minConfidence:  0.4,
 		},
 		{
@@ -375,7 +375,7 @@ func TestIdentifyCardWithImageAnalysis(t *testing.T) {
 			expectedCondition: "NM",
 		},
 		{
-			name: "Low confidence foil still triggers",
+			name: "Low confidence foil NOT auto-detected (conservative)",
 			text: "Bulbasaur\nHP 70\n001/185",
 			imageAnalysis: &services.ImageAnalysis{
 				IsFoilDetected:     true,
@@ -383,18 +383,18 @@ func TestIdentifyCardWithImageAnalysis(t *testing.T) {
 				SuggestedCondition: "LP",
 				EdgeWhiteningScore: 0.15,
 			},
-			expectedIsFoil:    true,
+			expectedIsFoil:    false, // Conservative: needs >= 0.8 to auto-set foil
 			expectedCondition: "LP",
 		},
 		{
-			name: "Text foil detection (VMAX) overrides image",
+			name: "VMAX text no longer auto-triggers foil (conservative)",
 			text: "Charizard VMAX\nHP 330",
 			imageAnalysis: &services.ImageAnalysis{
 				IsFoilDetected:     false,
 				FoilConfidence:     0.2,
 				SuggestedCondition: "MP",
 			},
-			expectedIsFoil:    true, // VMAX triggers foil
+			expectedIsFoil:    false, // Conservative: VMAX no longer auto-triggers foil
 			expectedCondition: "MP",
 		},
 		{

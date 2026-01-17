@@ -81,9 +81,10 @@ func (h *CollectionHandler) AddToCollection(c *gin.Context) {
 		condition = models.ConditionNearMint
 	}
 
-	// Check if already in collection (same card, condition, foil)
+	// Check if already in collection (same card, condition, foil, first_edition)
 	var existingItem models.CollectionItem
-	err := db.Where("card_id = ? AND condition = ? AND foil = ?", req.CardID, condition, req.Foil).
+	err := db.Where("card_id = ? AND condition = ? AND foil = ? AND first_edition = ?",
+		req.CardID, condition, req.Foil, req.FirstEdition).
 		First(&existingItem).Error
 
 	if err == nil {
@@ -100,12 +101,13 @@ func (h *CollectionHandler) AddToCollection(c *gin.Context) {
 
 	// Create new collection item
 	item := models.CollectionItem{
-		CardID:    req.CardID,
-		Quantity:  quantity,
-		Condition: condition,
-		Foil:      req.Foil,
-		Notes:     req.Notes,
-		AddedAt:   time.Now(),
+		CardID:       req.CardID,
+		Quantity:     quantity,
+		Condition:    condition,
+		Foil:         req.Foil,
+		FirstEdition: req.FirstEdition,
+		Notes:        req.Notes,
+		AddedAt:      time.Now(),
 	}
 
 	if err := db.Create(&item).Error; err != nil {
@@ -158,6 +160,9 @@ func (h *CollectionHandler) UpdateCollectionItem(c *gin.Context) {
 	}
 	if req.Foil != nil {
 		item.Foil = *req.Foil
+	}
+	if req.FirstEdition != nil {
+		item.FirstEdition = *req.FirstEdition
 	}
 	if req.Notes != nil {
 		item.Notes = *req.Notes

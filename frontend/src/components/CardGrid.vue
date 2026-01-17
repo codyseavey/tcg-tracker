@@ -42,6 +42,13 @@ const emit = defineEmits(['select'])
         >
           FOIL
         </div>
+        <div
+          v-if="item.first_edition"
+          class="absolute top-2 left-2 bg-amber-600 text-white text-xs font-bold px-2 py-1 rounded"
+          :class="{ 'top-10': item.foil }"
+        >
+          1ST ED
+        </div>
       </div>
       <div class="p-3">
         <h3 class="font-semibold text-sm truncate text-gray-800">

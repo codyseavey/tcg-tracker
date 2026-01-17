@@ -25,6 +25,7 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
   late int _quantity;
   late String _condition;
   late bool _foil;
+  late bool _firstEdition;
   bool _loading = false;
   bool _priceRefreshing = false;
 
@@ -41,6 +42,7 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
     _quantity = widget.collectionItem?.quantity ?? 1;
     _condition = widget.collectionItem?.condition ?? 'NM';
     _foil = widget.collectionItem?.foil ?? false;
+    _firstEdition = widget.collectionItem?.firstEdition ?? false;
   }
 
   @override
@@ -214,6 +216,23 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
                 ),
                 child: Text(
                   'FOIL',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+            if (_firstEdition) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade700,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '1ST ED',
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -454,6 +473,14 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
           onChanged: (value) => setState(() => _foil = value),
           contentPadding: EdgeInsets.zero,
         ),
+
+        // First Edition toggle
+        SwitchListTile(
+          title: const Text('1st Edition'),
+          value: _firstEdition,
+          onChanged: (value) => setState(() => _firstEdition = value),
+          contentPadding: EdgeInsets.zero,
+        ),
         const SizedBox(height: 24),
 
         // Update button
@@ -538,6 +565,14 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
           onChanged: (value) => setState(() => _foil = value),
           contentPadding: EdgeInsets.zero,
         ),
+
+        // First Edition toggle
+        SwitchListTile(
+          title: const Text('1st Edition'),
+          value: _firstEdition,
+          onChanged: (value) => setState(() => _firstEdition = value),
+          contentPadding: EdgeInsets.zero,
+        ),
         const SizedBox(height: 24),
 
         // Add button
@@ -568,6 +603,7 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
         quantity: _quantity,
         condition: _condition,
         foil: _foil,
+        firstEdition: _firstEdition,
       );
       messenger.showSnackBar(
         const SnackBar(
@@ -602,6 +638,7 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
         quantity: _quantity,
         condition: _condition,
         foil: _foil,
+        firstEdition: _firstEdition,
       );
       messenger.showSnackBar(
         const SnackBar(

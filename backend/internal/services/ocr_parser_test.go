@@ -41,7 +41,7 @@ HP 190
 			wantSetTotal:   "185",
 			wantHP:         "190",
 			wantCardName:   "Pikachu V",
-			wantIsFoil:     true,
+			wantIsFoil:     false, // Conservative: V cards come in both foil and non-foil
 			minConfidence:  0.7,
 		},
 		{
@@ -51,7 +51,7 @@ TG17/TG30
 Darkness`,
 			wantCardNumber: "TG17",
 			wantCardName:   "Umbreon VMAX",
-			wantIsFoil:     true,
+			wantIsFoil:     false, // Conservative: VMAX cards come in both foil and non-foil
 			minConfidence:  0.4,
 		},
 		{
@@ -85,7 +85,7 @@ HP 320
 			wantSetTotal:   "203",
 			wantHP:         "320",
 			wantCardName:   "Rayquaza VMAX",
-			wantIsFoil:     true,
+			wantIsFoil:     false, // Conservative: VMAX cards come in both foil and non-foil
 			minConfidence:  0.8,
 		},
 		{
@@ -100,7 +100,7 @@ SWSH9`,
 			wantHP:         "280",
 			wantSetCode:    "swsh9",
 			wantCardName:   "Arceus VSTAR",
-			wantIsFoil:     true,
+			wantIsFoil:     false, // Conservative: VSTAR cards come in both foil and non-foil
 			minConfidence:  0.8,
 		},
 		{
@@ -115,7 +115,7 @@ SV4`,
 			wantHP:         "330",
 			wantSetCode:    "sv4",
 			wantCardName:   "Charizard ex",
-			wantIsFoil:     true,
+			wantIsFoil:     false, // Conservative: ex cards come in both foil and non-foil
 			minConfidence:  0.8,
 		},
 		{
@@ -170,7 +170,7 @@ Fusion Strike
 			wantSetTotal:   "264",
 			wantHP:         "310",
 			wantCardName:   "Mew VMAX",
-			wantIsFoil:     true,
+			wantIsFoil:     false, // Conservative: Full Art only medium confidence, not auto-foil
 			minConfidence:  0.7,
 		},
 		{
@@ -184,7 +184,7 @@ HP 310
 			wantSetTotal:   "185",
 			wantHP:         "310",
 			wantCardName:   "Pikachu VMAX",
-			wantIsFoil:     true,
+			wantIsFoil:     false, // Conservative: Rainbow/Secret only medium confidence, not auto-foil
 			minConfidence:  0.7,
 		},
 		{
@@ -219,7 +219,7 @@ Gold
 			wantCardNumber: "163",
 			wantSetTotal:   "159",
 			wantCardName:   "Energy Switch",
-			wantIsFoil:     true,
+			wantIsFoil:     false, // Conservative: Gold only medium confidence, not auto-foil
 		},
 		{
 			name: "Promo card",
@@ -243,7 +243,7 @@ HP 230
 			wantHP:         "230",
 			wantSetCode:    "sv3pt5",
 			wantCardName:   "Mewtwo ex",
-			wantIsFoil:     true,
+			wantIsFoil:     false, // Conservative: ex cards come in both foil and non-foil
 			minConfidence:  0.8,
 		},
 		{
@@ -258,7 +258,7 @@ HP 180
 			wantSetTotal:   "165",
 			wantHP:         "180",
 			wantCardName:   "Charizard",
-			wantIsFoil:     true,
+			wantIsFoil:     false, // Conservative: Illustration/Special Art only medium confidence, not auto-foil
 		},
 	}
 
@@ -484,7 +484,7 @@ func TestImageAnalysisIntegration(t *testing.T) {
 			wantCondition: "NM",
 		},
 		{
-			name:  "Low confidence foil still detected",
+			name:  "Low confidence foil NOT auto-detected (conservative)",
 			input: "Bulbasaur\nHP 70\n001/185",
 			analysis: &ImageAnalysis{
 				IsFoilDetected:     true,
@@ -498,7 +498,7 @@ func TestImageAnalysisIntegration(t *testing.T) {
 					"bottomRight": 0.15,
 				},
 			},
-			wantIsFoil:    true,
+			wantIsFoil:    false, // Conservative: needs >= 0.8 confidence to auto-set foil
 			wantCondition: "LP",
 		},
 		{
@@ -520,7 +520,7 @@ func TestImageAnalysisIntegration(t *testing.T) {
 			wantCondition: "NM",
 		},
 		{
-			name:  "Text detected foil overrides low image confidence",
+			name:  "VMAX text no longer auto-triggers foil (conservative)",
 			input: "Charizard VMAX\nHP 330\n020/185",
 			analysis: &ImageAnalysis{
 				IsFoilDetected:     false,
@@ -529,7 +529,7 @@ func TestImageAnalysisIntegration(t *testing.T) {
 				EdgeWhiteningScore: 0.25,
 				CornerScores:       map[string]float64{},
 			},
-			wantIsFoil:    true, // VMAX in text should trigger foil
+			wantIsFoil:    false, // Conservative: VMAX no longer auto-triggers foil
 			wantCondition: "MP",
 		},
 		{
@@ -680,7 +680,10 @@ func TestSetDetectionFromName(t *testing.T) {
 	}
 }
 
-// TestFoilDetection tests various foil detection patterns
+// TestFoilDetection tests foil detection with CONSERVATIVE behavior
+// Card types (V, VMAX, VSTAR, GX, EX) do NOT auto-trigger foil
+// Only explicit foil text (HOLO, FOIL, REVERSE HOLO) auto-triggers foil
+// See TestConservativeFoilDetection for more comprehensive coverage
 func TestFoilDetection(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -689,96 +692,100 @@ func TestFoilDetection(t *testing.T) {
 		wantIsFoil bool
 		wantHints  []string
 	}{
+		// Pokemon card types - should NOT auto-trigger foil (conservative)
 		{
 			name:       "Pokemon V card",
 			input:      "Pikachu V\nHP 190",
 			game:       "pokemon",
-			wantIsFoil: true,
+			wantIsFoil: false, // Conservative: V cards come in both foil and non-foil
 		},
 		{
 			name:       "Pokemon VMAX card",
 			input:      "Charizard VMAX\nHP 330",
 			game:       "pokemon",
-			wantIsFoil: true,
+			wantIsFoil: false, // Conservative: VMAX cards come in both foil and non-foil
 		},
 		{
 			name:       "Pokemon VSTAR card",
 			input:      "Arceus VSTAR\nHP 280",
 			game:       "pokemon",
-			wantIsFoil: true,
+			wantIsFoil: false, // Conservative: VSTAR cards come in both foil and non-foil
 		},
 		{
 			name:       "Pokemon GX card",
 			input:      "Umbreon GX\nHP 200",
 			game:       "pokemon",
-			wantIsFoil: true,
+			wantIsFoil: false, // Conservative: GX cards come in both foil and non-foil
 		},
 		{
 			name:       "Pokemon EX card",
 			input:      "Mewtwo EX\nHP 170",
 			game:       "pokemon",
-			wantIsFoil: true,
+			wantIsFoil: false, // Conservative: EX cards come in both foil and non-foil
 		},
 		{
 			name:       "Pokemon ex lowercase modern",
 			input:      "Charizard ex\nHP 330",
 			game:       "pokemon",
-			wantIsFoil: true,
+			wantIsFoil: false, // Conservative: ex cards come in both foil and non-foil
 		},
+		// Explicit foil text - SHOULD auto-trigger foil
 		{
 			name:       "Pokemon Holo text",
 			input:      "Pikachu\nHolo Rare\nHP 60",
 			game:       "pokemon",
-			wantIsFoil: true,
+			wantIsFoil: true, // Explicit "Holo" text
 		},
 		{
 			name:       "Pokemon Reverse Holo",
 			input:      "Magikarp\nReverse Holo\nHP 30",
 			game:       "pokemon",
-			wantIsFoil: true,
+			wantIsFoil: true, // Explicit "Reverse Holo" text
 		},
+		// Medium confidence patterns - should NOT auto-trigger foil
 		{
 			name:       "Pokemon Full Art",
 			input:      "Professor's Research\nFull Art\nTrainer - Supporter",
 			game:       "pokemon",
-			wantIsFoil: true,
+			wantIsFoil: false, // Medium confidence only
 		},
 		{
 			name:       "Pokemon Rainbow Rare",
 			input:      "Pikachu VMAX\nRainbow Rare\nHP 310",
 			game:       "pokemon",
-			wantIsFoil: true,
+			wantIsFoil: false, // Medium confidence only
 		},
 		{
 			name:       "Pokemon Secret Rare",
 			input:      "Gold Energy\nSecret\n188/185",
 			game:       "pokemon",
-			wantIsFoil: true,
+			wantIsFoil: false, // Medium confidence only
 		},
 		{
 			name:       "Pokemon Gold card",
 			input:      "Switch\nGold\nTrainer - Item",
 			game:       "pokemon",
-			wantIsFoil: true,
+			wantIsFoil: false, // Medium confidence only
 		},
 		{
 			name:       "Pokemon Illustration Rare",
 			input:      "Miraidon\nIllustration Rare\nHP 220",
 			game:       "pokemon",
-			wantIsFoil: true,
+			wantIsFoil: false, // Medium confidence only
 		},
 		{
 			name:       "Pokemon Special Art Rare",
 			input:      "Giratina V\nSpecial Art Rare\nHP 220",
 			game:       "pokemon",
-			wantIsFoil: true,
+			wantIsFoil: false, // Medium confidence only
 		},
 		{
 			name:       "Pokemon shiny",
 			input:      "Charizard\nShiny\nHP 170",
 			game:       "pokemon",
-			wantIsFoil: true,
+			wantIsFoil: false, // Medium confidence only
 		},
+		// MTG explicit foil text - SHOULD auto-trigger foil
 		{
 			name:       "MTG foil",
 			input:      "Lightning Bolt\nFoil\nInstant",
@@ -809,6 +816,7 @@ func TestFoilDetection(t *testing.T) {
 			game:       "mtg",
 			wantIsFoil: true,
 		},
+		// Regular cards - should NOT be foil
 		{
 			name:       "Regular Pokemon card not foil",
 			input:      "Bulbasaur\nHP 70\nBasic\n001/185",
@@ -1304,7 +1312,7 @@ SWSH3
 			wantSetCode:       "swsh3",
 			wantCardName:      "Charizard VMAX",
 			wantHP:            "330",
-			wantIsFoil:        true,
+			wantIsFoil:        false, // Conservative: VMAX no longer auto-triggers foil
 			wantMinConfidence: 0.9,
 		},
 		{
@@ -1321,7 +1329,7 @@ Vivid Voltage
 			wantSetCode:       "swsh4",
 			wantCardName:      "Pikachu V",
 			wantHP:            "190",
-			wantIsFoil:        true,
+			wantIsFoil:        false, // Conservative: V cards no longer auto-trigger foil
 			wantMinConfidence: 0.8,
 		},
 		{
@@ -1337,7 +1345,7 @@ Illus. HYOGONOSUKE`,
 			wantSetCode:       "swsh9",
 			wantCardName:      "Umbreon VMAX",
 			wantHP:            "310",
-			wantIsFoil:        true,
+			wantIsFoil:        false, // Conservative: VMAX no longer auto-triggers foil
 			wantMinConfidence: 0.7,
 		},
 		{
@@ -1355,7 +1363,7 @@ SV3PT5`,
 			wantSetCode:       "sv3pt5",
 			wantCardName:      "Mewtwo ex",
 			wantHP:            "330",
-			wantIsFoil:        true,
+			wantIsFoil:        false, // Conservative: ex cards no longer auto-trigger foil
 			wantMinConfidence: 0.9,
 		},
 		{
@@ -1371,7 +1379,7 @@ Paldean Fates
 			wantSetCode:       "sv4pt5",
 			wantCardName:      "Charizard ex",
 			wantHP:            "330",
-			wantIsFoil:        true,
+			wantIsFoil:        false, // Conservative: Special Art/Illustration Rare only medium confidence
 			wantMinConfidence: 0.8,
 		},
 		{
@@ -1830,6 +1838,2055 @@ SWSH3`
 			if result.HP != tt.expected.hp {
 				t.Errorf("HP = %q, want %q", result.HP, tt.expected.hp)
 			}
+		})
+	}
+}
+
+// TestBaseSetCardExtraction tests OCR parsing for classic Base Set era cards
+func TestBaseSetCardExtraction(t *testing.T) {
+	tests := []struct {
+		name           string
+		input          string
+		wantCardNumber string
+		wantSetCode    string
+		wantCardName   string
+		wantHP         string
+		wantIsFoil     bool
+		minConfidence  float64
+	}{
+		{
+			name: "Base Set Charizard Holo",
+			input: `Charizard
+HP 120
+Stage 2
+Evolves from Charmeleon
+Fire Spin
+4/102
+©1999 Wizards`,
+			wantCardNumber: "4",
+			wantSetCode:    "base1",
+			wantCardName:   "Charizard",
+			wantHP:         "120",
+			minConfidence:  0.7,
+		},
+		{
+			name: "Base Set Blastoise",
+			input: `Blastoise
+HP 100
+Stage 2
+Water
+Rain Dance
+2/102`,
+			wantCardNumber: "2",
+			wantSetCode:    "base1",
+			wantCardName:   "Blastoise",
+			wantHP:         "100",
+			minConfidence:  0.7,
+		},
+		{
+			name: "Base Set Venusaur",
+			input: `Venusaur
+HP 100
+Stage 2
+Grass
+Energy Trans
+15/102`,
+			wantCardNumber: "15",
+			wantSetCode:    "base1",
+			wantCardName:   "Venusaur",
+			wantHP:         "100",
+			minConfidence:  0.7,
+		},
+		{
+			name: "Base Set Pikachu",
+			input: `Pikachu
+HP 40
+Basic
+Lightning
+58/102`,
+			wantCardNumber: "58",
+			wantSetCode:    "base1",
+			wantCardName:   "Pikachu",
+			wantHP:         "40",
+			minConfidence:  0.7,
+		},
+		{
+			name: "Jungle Jolteon Holo",
+			input: `Jolteon
+HP 70
+Stage 1
+Evolves from Eevee
+Lightning
+4/64
+Jungle`,
+			wantCardNumber: "4",
+			wantSetCode:    "base2",
+			wantCardName:   "Jolteon",
+			wantHP:         "70",
+			minConfidence:  0.7,
+		},
+		{
+			name: "Fossil Gengar Holo",
+			input: `Gengar
+HP 80
+Stage 2
+Psychic
+Curse
+5/62`,
+			wantCardNumber: "5",
+			wantSetCode:    "base3",
+			wantCardName:   "Gengar",
+			wantHP:         "80",
+			minConfidence:  0.7,
+		},
+		{
+			name: "Team Rocket Dark Charizard",
+			input: `Dark Charizard
+HP 80
+Stage 2
+Fire
+Team Rocket
+4/82`,
+			wantCardNumber: "4",
+			wantSetCode:    "base5",
+			wantCardName:   "Dark Charizard",
+			wantHP:         "80",
+			minConfidence:  0.6,
+		},
+		{
+			name: "Neo Genesis Lugia",
+			input: `Lugia
+HP 90
+Basic
+Psychic
+Neo Genesis
+9/111`,
+			wantCardNumber: "9",
+			wantSetCode:    "neo1",
+			wantCardName:   "Lugia",
+			wantHP:         "90",
+			minConfidence:  0.7,
+		},
+		{
+			name: "Base Set card with PTCGO code",
+			input: `Alakazam
+HP 80
+Stage 2
+Psychic
+BS
+1/102`,
+			wantCardNumber: "1",
+			wantSetCode:    "base1",
+			wantCardName:   "Alakazam",
+			wantHP:         "80",
+			minConfidence:  0.7,
+		},
+		{
+			name: "Jungle card with PTCGO code",
+			input: `Scyther
+HP 70
+Basic
+Grass
+JU
+10/64`,
+			wantCardNumber: "10",
+			wantSetCode:    "base2",
+			wantCardName:   "Scyther",
+			wantHP:         "70",
+			minConfidence:  0.7,
+		},
+		{
+			name: "Fossil card with PTCGO code",
+			input: `Dragonite
+HP 100
+Stage 2
+Colorless
+FO
+4/62`,
+			wantCardNumber: "4",
+			wantSetCode:    "base3",
+			wantCardName:   "Dragonite",
+			wantHP:         "100",
+			minConfidence:  0.7,
+		},
+		{
+			name: "Base Set with set name text",
+			input: `Mewtwo
+HP 60
+Basic
+Psychic
+Base Set
+10/102`,
+			wantCardNumber: "10",
+			wantSetCode:    "base1",
+			wantCardName:   "Mewtwo",
+			wantHP:         "60",
+			minConfidence:  0.7,
+		},
+		{
+			name: "Gym Heroes Lt. Surge's Electabuzz",
+			input: `Lt. Surge's Electabuzz
+HP 70
+Basic
+Lightning
+Gym Heroes
+27/132`,
+			wantCardNumber: "27",
+			wantSetCode:    "gym1",
+			wantCardName:   "Lt. Surge's Electabuzz",
+			wantHP:         "70",
+			minConfidence:  0.5,
+		},
+		{
+			name: "Neo Discovery Umbreon",
+			input: `Umbreon
+HP 70
+Stage 1
+Darkness
+Neo Discovery
+32/75`,
+			wantCardNumber: "32",
+			wantSetCode:    "neo2",
+			wantCardName:   "Umbreon",
+			wantHP:         "70",
+			minConfidence:  0.7,
+		},
+		{
+			name: "Base Set with noisy OCR",
+			input: `Machamp
+H P 1 0 0
+Stage 2
+Fighting
+8/l02`,
+			// Note: l/1 confusion in number, should still extract name
+			wantCardName:  "Machamp",
+			minConfidence: 0.4,
+		},
+		{
+			name: "Legendary Collection Charizard",
+			input: `Charizard
+HP 120
+Stage 2
+Fire
+Legendary Collection
+3/110`,
+			wantCardNumber: "3",
+			wantSetCode:    "base6",
+			wantCardName:   "Charizard",
+			wantHP:         "120",
+			minConfidence:  0.7,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseOCRText(tt.input, "pokemon")
+
+			if result == nil {
+				t.Fatal("Result should not be nil")
+			}
+
+			if tt.wantCardNumber != "" && result.CardNumber != tt.wantCardNumber {
+				t.Errorf("CardNumber = %q, want %q", result.CardNumber, tt.wantCardNumber)
+			}
+
+			if tt.wantSetCode != "" && result.SetCode != tt.wantSetCode {
+				t.Errorf("SetCode = %q, want %q", result.SetCode, tt.wantSetCode)
+			}
+
+			if tt.wantCardName != "" && result.CardName != tt.wantCardName {
+				t.Errorf("CardName = %q, want %q", result.CardName, tt.wantCardName)
+			}
+
+			if tt.wantHP != "" && result.HP != tt.wantHP {
+				t.Errorf("HP = %q, want %q", result.HP, tt.wantHP)
+			}
+
+			if tt.wantIsFoil && !result.IsFoil {
+				t.Errorf("IsFoil = %v, want %v", result.IsFoil, tt.wantIsFoil)
+			}
+
+			if tt.minConfidence > 0 && result.Confidence < tt.minConfidence {
+				t.Errorf("Confidence = %v, want >= %v", result.Confidence, tt.minConfidence)
+			}
+		})
+	}
+}
+
+// TestPTCGOCodeDetection tests detection of PTCGO 2-letter set codes
+func TestPTCGOCodeDetection(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		wantSetCode string
+	}{
+		{
+			name:        "Base Set code BS",
+			input:       "Pikachu\nBS\n58/102",
+			wantSetCode: "base1",
+		},
+		{
+			name:        "Jungle code JU",
+			input:       "Eevee\nJU\n51/64",
+			wantSetCode: "base2",
+		},
+		{
+			name:        "Fossil code FO",
+			input:       "Aerodactyl\nFO\n1/62",
+			wantSetCode: "base3",
+		},
+		{
+			name:        "Team Rocket code TR",
+			input:       "Dark Dragonite\nTR\n5/82",
+			wantSetCode: "base5",
+		},
+		{
+			name:        "Gym Heroes code G1",
+			input:       "Brock's Rhydon\nG1\n2/132",
+			wantSetCode: "gym1",
+		},
+		{
+			name:        "Gym Challenge code G2",
+			input:       "Blaine's Charizard\nG2\n2/132",
+			wantSetCode: "gym2",
+		},
+		{
+			name:        "Neo Genesis code N1",
+			input:       "Feraligatr\nN1\n4/111",
+			wantSetCode: "neo1",
+		},
+		{
+			name:        "Legendary Collection code LC",
+			input:       "Mewtwo\nLC\n29/110",
+			wantSetCode: "base6",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseOCRText(tt.input, "pokemon")
+
+			if result.SetCode != tt.wantSetCode {
+				t.Errorf("SetCode = %q, want %q", result.SetCode, tt.wantSetCode)
+			}
+		})
+	}
+}
+
+// TestConservativeFoilDetection tests that foil detection is conservative
+// Card types (V, VMAX, VSTAR, GX, EX) should NOT trigger foil
+// Only explicit foil text (HOLO, FOIL, REVERSE HOLO) should trigger foil
+func TestConservativeFoilDetection(t *testing.T) {
+	tests := []struct {
+		name               string
+		input              string
+		game               string
+		wantIsFoil         bool
+		wantFoilConfidence float64
+		wantIndicatorCount int
+	}{
+		{
+			name:               "Pikachu V - should NOT be foil",
+			input:              "Pikachu V\nHP 190\n025/185",
+			game:               "pokemon",
+			wantIsFoil:         false,
+			wantFoilConfidence: 0,
+			wantIndicatorCount: 0,
+		},
+		{
+			name:               "Charizard VMAX - should NOT be foil",
+			input:              "Charizard VMAX\nHP 330\n020/189",
+			game:               "pokemon",
+			wantIsFoil:         false,
+			wantFoilConfidence: 0,
+			wantIndicatorCount: 0,
+		},
+		{
+			name:               "Arceus VSTAR - should NOT be foil",
+			input:              "Arceus VSTAR\nHP 280\n123/172",
+			game:               "pokemon",
+			wantIsFoil:         false,
+			wantFoilConfidence: 0,
+			wantIndicatorCount: 0,
+		},
+		{
+			name:               "Mewtwo GX - should NOT be foil",
+			input:              "Mewtwo GX\nHP 190\n072/073",
+			game:               "pokemon",
+			wantIsFoil:         false,
+			wantFoilConfidence: 0,
+			wantIndicatorCount: 0,
+		},
+		{
+			name:               "Charizard EX - should NOT be foil",
+			input:              "Charizard EX\nHP 180\n011/108",
+			game:               "pokemon",
+			wantIsFoil:         false,
+			wantFoilConfidence: 0,
+			wantIndicatorCount: 0,
+		},
+		{
+			name:               "Charizard ex (lowercase) - should NOT be foil",
+			input:              "Charizard ex\nHP 330\n006/091",
+			game:               "pokemon",
+			wantIsFoil:         false,
+			wantFoilConfidence: 0,
+			wantIndicatorCount: 0,
+		},
+		{
+			name:               "Pikachu with Holo text - SHOULD be foil",
+			input:              "Pikachu\nHolo\nHP 60\n058/102",
+			game:               "pokemon",
+			wantIsFoil:         true,
+			wantFoilConfidence: 0.9,
+			wantIndicatorCount: 1,
+		},
+		{
+			name:               "Reverse Holo card - SHOULD be foil",
+			input:              "Bulbasaur\nReverse Holo\nHP 70\n001/198",
+			game:               "pokemon",
+			wantIsFoil:         true,
+			wantFoilConfidence: 0.9,
+			wantIndicatorCount: 1,
+		},
+		{
+			name:               "Holo Rare text - SHOULD be foil",
+			input:              "Umbreon\nHolo Rare\nHP 110\n095/203",
+			game:               "pokemon",
+			wantIsFoil:         true,
+			wantFoilConfidence: 0.9,
+			wantIndicatorCount: 1,
+		},
+		{
+			name:               "VMAX with Rainbow Rare - medium confidence only",
+			input:              "Pikachu VMAX\nRainbow Rare\nHP 310\n188/185",
+			game:               "pokemon",
+			wantIsFoil:         false, // Rainbow alone doesn't trigger foil
+			wantFoilConfidence: 0.6,
+			wantIndicatorCount: 1,
+		},
+		{
+			name:               "Gold card - medium confidence only",
+			input:              "Switch\nGold\nTrainer - Item\n163/159",
+			game:               "pokemon",
+			wantIsFoil:         false, // Gold alone doesn't trigger foil
+			wantFoilConfidence: 0.6,
+			wantIndicatorCount: 1,
+		},
+		{
+			name:               "Secret rare - medium confidence only",
+			input:              "Energy\nSecret\n188/185",
+			game:               "pokemon",
+			wantIsFoil:         false, // Secret alone doesn't trigger foil
+			wantFoilConfidence: 0.6,
+			wantIndicatorCount: 1,
+		},
+		{
+			name:               "Regular Pokemon - not foil",
+			input:              "Bulbasaur\nHP 70\nBasic\n001/185",
+			game:               "pokemon",
+			wantIsFoil:         false,
+			wantFoilConfidence: 0,
+			wantIndicatorCount: 0,
+		},
+		{
+			name:               "MTG with FOIL text - SHOULD be foil",
+			input:              "Lightning Bolt\nFoil\nInstant\n073/303",
+			game:               "mtg",
+			wantIsFoil:         true,
+			wantFoilConfidence: 0, // MTG uses different detection path
+			wantIndicatorCount: 1,
+		},
+		{
+			name:               "MTG with ETCHED text - SHOULD be foil",
+			input:              "Sol Ring\nEtched\nArtifact",
+			game:               "mtg",
+			wantIsFoil:         true,
+			wantFoilConfidence: 0, // MTG uses different detection
+			wantIndicatorCount: 1,
+		},
+		{
+			name:               "Regular MTG card - not foil",
+			input:              "Island\nBasic Land - Island",
+			game:               "mtg",
+			wantIsFoil:         false,
+			wantFoilConfidence: 0,
+			wantIndicatorCount: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseOCRText(tt.input, tt.game)
+
+			if result.IsFoil != tt.wantIsFoil {
+				t.Errorf("IsFoil = %v, want %v (indicators: %v)", result.IsFoil, tt.wantIsFoil, result.FoilIndicators)
+			}
+
+			if result.FoilConfidence != tt.wantFoilConfidence {
+				t.Errorf("FoilConfidence = %v, want %v", result.FoilConfidence, tt.wantFoilConfidence)
+			}
+
+			if len(result.FoilIndicators) != tt.wantIndicatorCount {
+				t.Errorf("FoilIndicators count = %d, want %d (indicators: %v)",
+					len(result.FoilIndicators), tt.wantIndicatorCount, result.FoilIndicators)
+			}
+		})
+	}
+}
+
+// TestFirstEditionDetection tests detection of 1st Edition Pokemon cards
+func TestFirstEditionDetection(t *testing.T) {
+	tests := []struct {
+		name                  string
+		input                 string
+		wantIsFirstEdition    bool
+		wantFirstEdIndicators int
+	}{
+		{
+			name:                  "1ST EDITION text",
+			input:                 "Charizard\n1ST EDITION\nHP 120\n4/102",
+			wantIsFirstEdition:    true,
+			wantFirstEdIndicators: 1,
+		},
+		{
+			name:                  "1ST ED abbreviation",
+			input:                 "Blastoise\n1ST ED\nHP 100\n2/102",
+			wantIsFirstEdition:    true,
+			wantFirstEdIndicators: 1,
+		},
+		{
+			name:                  "FIRST EDITION text",
+			input:                 "Venusaur\nFIRST EDITION\nHP 100\n15/102",
+			wantIsFirstEdition:    true,
+			wantFirstEdIndicators: 1,
+		},
+		{
+			name:                  "Regular Base Set card - no first edition",
+			input:                 "Pikachu\nHP 40\n58/102",
+			wantIsFirstEdition:    false,
+			wantFirstEdIndicators: 0,
+		},
+		{
+			name:                  "Modern card - no first edition",
+			input:                 "Charizard VMAX\nHP 330\n020/189",
+			wantIsFirstEdition:    false,
+			wantFirstEdIndicators: 0,
+		},
+		{
+			name:                  "Shadowless card - indicator but not first edition",
+			input:                 "Charizard\nShadowless\nHP 120\n4/102",
+			wantIsFirstEdition:    false,
+			wantFirstEdIndicators: 1, // Shadowless is an indicator for verification
+		},
+		{
+			name:                  "1st Edition with Holo",
+			input:                 "Alakazam\n1ST EDITION\nHolo\nHP 80\n1/102",
+			wantIsFirstEdition:    true,
+			wantFirstEdIndicators: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseOCRText(tt.input, "pokemon")
+
+			if result.IsFirstEdition != tt.wantIsFirstEdition {
+				t.Errorf("IsFirstEdition = %v, want %v", result.IsFirstEdition, tt.wantIsFirstEdition)
+			}
+
+			if len(result.FirstEdIndicators) != tt.wantFirstEdIndicators {
+				t.Errorf("FirstEdIndicators count = %d, want %d (indicators: %v)",
+					len(result.FirstEdIndicators), tt.wantFirstEdIndicators, result.FirstEdIndicators)
+			}
+		})
+	}
+}
+
+// TestWotCEraDetection tests detection of Wizards of the Coast era cards
+func TestWotCEraDetection(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		wantIsWotC  bool
+		wantSetCode string
+	}{
+		{
+			name: "Wizards copyright text",
+			input: `Charizard
+HP 120
+4/102
+©1999 Wizards of the Coast`,
+			wantIsWotC:  true,
+			wantSetCode: "base1",
+		},
+		{
+			name: "Wizards abbreviated",
+			input: `Blastoise
+HP 100
+2/102
+WIZARDS`,
+			wantIsWotC:  true,
+			wantSetCode: "base1",
+		},
+		{
+			name: "1999 copyright year",
+			input: `Venusaur
+HP 100
+15/102
+©1999`,
+			wantIsWotC:  true,
+			wantSetCode: "base1",
+		},
+		{
+			name: "OCR error W1ZARDS",
+			input: `Pikachu
+HP 40
+58/102
+W1ZARDS`,
+			wantIsWotC:  true,
+			wantSetCode: "base1",
+		},
+		{
+			name: "Set total 102 with no modern indicators",
+			input: `Alakazam
+HP 80
+1/102`,
+			wantIsWotC:  true,
+			wantSetCode: "base1",
+		},
+		{
+			name: "Set total 64 (Jungle)",
+			input: `Jolteon
+HP 70
+4/64`,
+			wantIsWotC:  true,
+			wantSetCode: "base2", // Jungle
+		},
+		{
+			name: "Set total 62 (Fossil)",
+			input: `Gengar
+HP 80
+5/62`,
+			wantIsWotC:  true,
+			wantSetCode: "base3", // Fossil
+		},
+		{
+			name: "Modern card - not WotC era",
+			input: `Charizard VMAX
+HP 330
+SWSH3
+020/189`,
+			wantIsWotC:  false,
+			wantSetCode: "swsh3",
+		},
+		{
+			name: "Modern set total 185 - not WotC era",
+			input: `Pikachu
+HP 60
+025/185`,
+			wantIsWotC:  false,
+			wantSetCode: "swsh4",
+		},
+		{
+			name: "Ambiguous total 102 with Wizards copyright - should be base1 not hgss4",
+			input: `Raichu
+HP 90
+14/102
+©1999 Wizards`,
+			wantIsWotC:  true,
+			wantSetCode: "base1", // Not hgss4
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseOCRText(tt.input, "pokemon")
+
+			if result.IsWotCEra != tt.wantIsWotC {
+				t.Errorf("IsWotCEra = %v, want %v", result.IsWotCEra, tt.wantIsWotC)
+			}
+
+			if tt.wantSetCode != "" && result.SetCode != tt.wantSetCode {
+				t.Errorf("SetCode = %q, want %q", result.SetCode, tt.wantSetCode)
+			}
+		})
+	}
+}
+
+// TestOCRNameCorrection tests OCR error correction for Pokemon names
+func TestOCRNameCorrection(t *testing.T) {
+	tests := []struct {
+		name         string
+		input        string
+		wantCardName string
+	}{
+		{
+			name: "Charizard with 1 instead of i",
+			input: `Char1zard
+HP 120
+4/102`,
+			wantCardName: "Charizard",
+		},
+		{
+			name: "Alakazam with rn instead of m",
+			input: `Alakazarn
+HP 80
+1/102`,
+			wantCardName: "Alakazam",
+		},
+		{
+			name: "Pikachu with 1 instead of i",
+			input: `P1kachu
+HP 40
+58/102`,
+			wantCardName: "Pikachu",
+		},
+		{
+			name: "Mewtwo with 0 instead of o",
+			input: `Mewtw0
+HP 60
+10/102`,
+			wantCardName: "Mewtwo",
+		},
+		{
+			name: "Machamp with rn instead of m",
+			input: `Macharnp
+HP 100
+8/102`,
+			wantCardName: "Machamp",
+		},
+		{
+			name: "Gyarados with 0 instead of o",
+			input: `Gyarad0s
+HP 100
+6/102`,
+			wantCardName: "Gyarados",
+		},
+		{
+			name: "Dragonite with 1 instead of i",
+			input: `Dragon1te
+HP 100
+4/62`,
+			wantCardName: "Dragonite",
+		},
+		{
+			name: "Gengar with q instead of g",
+			input: `Genqar
+HP 80
+5/62`,
+			wantCardName: "Gengar",
+		},
+		{
+			name: "Snorlax with space",
+			input: `Snorl ax
+HP 90
+11/64`,
+			wantCardName: "Snorlax",
+		},
+		{
+			name: "Blastoise with 1 instead of i",
+			input: `Blasto1se
+HP 100
+2/102`,
+			wantCardName: "Blastoise",
+		},
+		{
+			name: "Clean name should not change",
+			input: `Charizard
+HP 120
+4/102`,
+			wantCardName: "Charizard",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseOCRText(tt.input, "pokemon")
+
+			if result.CardName != tt.wantCardName {
+				t.Errorf("CardName = %q, want %q", result.CardName, tt.wantCardName)
+			}
+		})
+	}
+}
+
+// TestBaseSetRealWorldOCR tests realistic OCR output from Base Set card scans
+func TestBaseSetRealWorldOCR(t *testing.T) {
+	tests := []struct {
+		name           string
+		input          string
+		wantCardNumber string
+		wantSetCode    string
+		wantCardName   string
+		wantHP         string
+		wantIsWotC     bool
+		minConfidence  float64
+	}{
+		{
+			name: "Base Set Charizard - clean scan",
+			input: `Charizard
+HP 120
+Stage 2 Evolves from Charmeleon
+Fire Spin 100
+Discard 2 Energy cards attached to Charizard
+4/102
+Illus. Mitsuhiro Arita
+©1995, 96, 98, 99 Wizards of the Coast`,
+			wantCardNumber: "4",
+			wantSetCode:    "base1",
+			wantCardName:   "Charizard",
+			wantHP:         "120",
+			wantIsWotC:     true,
+			minConfidence:  0.7,
+		},
+		{
+			name: "Base Set Blastoise - moderate OCR quality",
+			input: `Blasto1se
+HP l00
+Stage 2 Evolves from Wartoitle
+Rain Dance
+2/l02
+©1999 Wizards`,
+			wantCardNumber: "2",
+			wantSetCode:    "base1",
+			wantCardName:   "Blastoise",
+			wantIsWotC:     true,
+			minConfidence:  0.5,
+		},
+		{
+			name: "Base Set Venusaur - noisy scan",
+			input: `Venusaur
+HP 100
+Energy Trans
+Pokémon Power
+15/102
+WIZARDS OF THE COAST`,
+			wantCardNumber: "15",
+			wantSetCode:    "base1",
+			wantCardName:   "Venusaur",
+			wantHP:         "100",
+			wantIsWotC:     true,
+			minConfidence:  0.7,
+		},
+		{
+			name: "Jungle Scyther",
+			input: `Scyther
+HP 70
+Basic Pokémon
+Grass
+Swords Dance
+Slash 30
+10/64
+©1999 Wizards`,
+			wantCardNumber: "10",
+			wantSetCode:    "base2",
+			wantCardName:   "Scyther",
+			wantHP:         "70",
+			wantIsWotC:     true,
+			minConfidence:  0.7,
+		},
+		{
+			name: "Fossil Aerodactyl",
+			input: `Aerodactyl
+HP 60
+Stage 1 Evolves from Mysterious Fossil
+Prehistoric Power
+1/62
+Fossil`,
+			wantCardNumber: "1",
+			wantSetCode:    "base3",
+			wantCardName:   "Aerodactyl",
+			wantHP:         "60",
+			wantIsWotC:     true,
+			minConfidence:  0.7,
+		},
+		{
+			name: "Team Rocket Dark Charizard - noisy",
+			input: `Dark Chari zard
+HP 80
+Stage 2
+Fire
+Team Rocket
+4/82`,
+			wantCardNumber: "4",
+			wantSetCode:    "base5",
+			wantCardName:   "Dark Charizard",
+			wantHP:         "80",
+			wantIsWotC:     true,
+			minConfidence:  0.5,
+		},
+		{
+			name: "Neo Genesis Lugia - clean",
+			input: `Lugia
+HP 90
+Basic Pokémon
+Psychic
+Aeroblast
+Neo Genesis
+9/111`,
+			wantCardNumber: "9",
+			wantSetCode:    "neo1",
+			wantCardName:   "Lugia",
+			wantHP:         "90",
+			wantIsWotC:     true,
+			minConfidence:  0.7,
+		},
+		{
+			name: "First Edition Base Set Alakazam",
+			input: `Alakazarn
+HP 80
+Stage 2
+Psychic
+Damage Swap
+1ST EDITION
+1/102
+Wizards`,
+			wantCardNumber: "1",
+			wantSetCode:    "base1",
+			wantCardName:   "Alakazam",
+			wantHP:         "80",
+			wantIsWotC:     true,
+			minConfidence:  0.5,
+		},
+		{
+			name: "Gym Heroes Lt. Surge's Electabuzz",
+			input: `Lt. Surge's Electabuzz
+HP 70
+Basic Pokémon
+Lightning
+Gym Heroes
+27/132`,
+			wantCardNumber: "27",
+			wantSetCode:    "gym1",
+			wantCardName:   "Lt. Surge's Electabuzz",
+			wantHP:         "70",
+			wantIsWotC:     true,
+			minConfidence:  0.5,
+		},
+		{
+			name: "Base Set Pikachu - poor quality scan",
+			input: `P1kachu
+w 40
+Basic
+Lightning
+58/l02
+W1ZARDS`,
+			wantCardNumber: "58",
+			wantSetCode:    "base1",
+			wantCardName:   "Pikachu",
+			wantIsWotC:     true,
+			minConfidence:  0.3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseOCRText(tt.input, "pokemon")
+
+			if result == nil {
+				t.Fatal("Result should not be nil")
+			}
+
+			if tt.wantCardNumber != "" && result.CardNumber != tt.wantCardNumber {
+				t.Errorf("CardNumber = %q, want %q", result.CardNumber, tt.wantCardNumber)
+			}
+
+			if tt.wantSetCode != "" && result.SetCode != tt.wantSetCode {
+				t.Errorf("SetCode = %q, want %q", result.SetCode, tt.wantSetCode)
+			}
+
+			if tt.wantCardName != "" && result.CardName != tt.wantCardName {
+				t.Errorf("CardName = %q, want %q", result.CardName, tt.wantCardName)
+			}
+
+			if tt.wantHP != "" && result.HP != tt.wantHP {
+				t.Errorf("HP = %q, want %q", result.HP, tt.wantHP)
+			}
+
+			if result.IsWotCEra != tt.wantIsWotC {
+				t.Errorf("IsWotCEra = %v, want %v", result.IsWotCEra, tt.wantIsWotC)
+			}
+
+			if tt.minConfidence > 0 && result.Confidence < tt.minConfidence {
+				t.Errorf("Confidence = %v, want >= %v", result.Confidence, tt.minConfidence)
+			}
+		})
+	}
+}
+
+// TestImageAnalysisConservativeFoil tests that image analysis uses conservative foil detection
+func TestImageAnalysisConservativeFoil(t *testing.T) {
+	tests := []struct {
+		name       string
+		input      string
+		analysis   *ImageAnalysis
+		wantIsFoil bool
+	}{
+		{
+			name:  "High confidence (0.85) image foil detection - SHOULD set foil",
+			input: "Pikachu\nHP 60\n025/185",
+			analysis: &ImageAnalysis{
+				IsFoilDetected: true,
+				FoilConfidence: 0.85,
+			},
+			wantIsFoil: true,
+		},
+		{
+			name:  "Medium confidence (0.65) image foil detection - should NOT set foil",
+			input: "Pikachu\nHP 60\n025/185",
+			analysis: &ImageAnalysis{
+				IsFoilDetected: true,
+				FoilConfidence: 0.65,
+			},
+			wantIsFoil: false,
+		},
+		{
+			name:  "Low confidence (0.3) image foil detection - should NOT set foil",
+			input: "Pikachu\nHP 60\n025/185",
+			analysis: &ImageAnalysis{
+				IsFoilDetected: true,
+				FoilConfidence: 0.3,
+			},
+			wantIsFoil: false,
+		},
+		{
+			name:  "Exactly 0.8 confidence - SHOULD set foil",
+			input: "Pikachu\nHP 60\n025/185",
+			analysis: &ImageAnalysis{
+				IsFoilDetected: true,
+				FoilConfidence: 0.8,
+			},
+			wantIsFoil: true,
+		},
+		{
+			name:  "Just under 0.8 (0.79) - should NOT set foil",
+			input: "Pikachu\nHP 60\n025/185",
+			analysis: &ImageAnalysis{
+				IsFoilDetected: true,
+				FoilConfidence: 0.79,
+			},
+			wantIsFoil: false,
+		},
+		{
+			name:  "High confidence but IsFoilDetected is false",
+			input: "Pikachu\nHP 60\n025/185",
+			analysis: &ImageAnalysis{
+				IsFoilDetected: false,
+				FoilConfidence: 0.9,
+			},
+			wantIsFoil: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseOCRTextWithAnalysis(tt.input, "pokemon", tt.analysis)
+
+			if result.IsFoil != tt.wantIsFoil {
+				t.Errorf("IsFoil = %v, want %v (FoilConfidence: %v, indicators: %v)",
+					result.IsFoil, tt.wantIsFoil, result.FoilConfidence, result.FoilIndicators)
+			}
+		})
+	}
+}
+
+// TestRealWorldBaseSetOCRFromImages tests OCR parsing with actual Tesseract output from card scans
+func TestRealWorldBaseSetOCRFromImages(t *testing.T) {
+	tests := []struct {
+		name           string
+		input          string
+		wantCardName   string
+		wantCardNumber string
+		wantSetCode    string
+		wantIsWotC     bool
+	}{
+		{
+			name: "Base Set Pikachu - realistic OCR output with artifacts",
+			input: `Thunder Jolt Flip a coin. If
+4) \¥) tails, Pikachu does 10 damage 30
+to itself.
+
+weakness resistance retreat cost
+
+When several of these Pokémon gather, their electricity ean
+cause lightning storm< IV. 12 #25
+
+Mus. Mitsuhiro Arita ©1995, 96, 96 lic hSE crower: 581102 @`,
+			wantCardName:   "Pikachu",
+			wantCardNumber: "",     // Card number format is corrupted
+			wantSetCode:    "",     // No clear set code
+			wantIsWotC:     true,   // Should detect ©1995
+		},
+		{
+			name: "Base Set Pikachu - cleaned OCR output",
+			input: `Thunder Jolt Flip a coin. If
+tails, Pikachu does 10 damage 30
+to itself.
+
+weakness resistance retreat cost
+
+When several of these Pokémon gather, their electricity can
+cause lightning storms. IV. 12 #25
+
+Illus. Mitsuhiro Arita ©1995, 96, 98 Nintendo. 58/102`,
+			wantCardName:   "Pikachu",
+			wantCardNumber: "58",
+			wantSetCode:    "base1",
+			wantIsWotC:     true,
+		},
+		{
+			name: "Base Set Charizard - partial OCR from holo card",
+			input: `rey a ae
+rest of the turn. This power can't be used if Charizard
+is Asleep, Confused, or Paralyzed.
+
+Fire Spin Discard 2 Energy cards 100
+attached to Charizard in order to use
+
+4/102
+©1999 Wizards`,
+			wantCardName:   "Charizard",
+			wantCardNumber: "4",
+			wantSetCode:    "base1",
+			wantIsWotC:     true,
+		},
+		{
+			name: "Jungle Scyther - real Tesseract OCR output",
+			input: `Basic Pokémon
+
+Scyther
+
+Mantis Pokémon. Length: 4' ||", Weight: 123 Ibs. G23
+
+Swords Dance During your next
+turn, Scyther's Slash attack's base damage
+is 60 instead of 30.
+
+Slash 30
+
+weakness, resistance retreat cost
+
+With ninja-like agility and speed, it can create the illusion
+that there is more than one of it. LV.25 #123
+
+Ken Sugimori ©1999 Nintendo. 10/64`,
+			wantCardName:   "Scyther",
+			wantCardNumber: "10",
+			wantSetCode:    "base2", // Jungle
+			wantIsWotC:     true,
+		},
+		{
+			name: "Fossil Gengar - real Tesseract OCR output",
+			input: `Shadow Pokémon. Length: 4' 11", Weight: 89 Ibs.
+Pokémon Power: Curse Once during your turn
+(before your attack), you may move 1 damage counter from 1
+of your opponent's Pokémon to another (even if it would
+Knock Out the other Pokémon). This power can't be used if
+Gengar is Asleep, Confused, or Paralyzed.
+
+Dark Mind If your opponent has any
+Benched Pokémon, choose 1 of them and this 30
+attack does 10 damage to it.
+weakness resistance retreat cost
+
+5/62
+©1999 Wizards`,
+			wantCardName:   "Gengar",
+			wantCardNumber: "5",
+			wantSetCode:    "base3", // Fossil
+			wantIsWotC:     true,
+		},
+		{
+			name: "Team Rocket Dark Charizard - real Tesseract OCR",
+			input: `Dark Charizard
+Nail Flick 10
+Continuous Fireball Flip a number
+of coins equal to the number of Fire Energy
+cards attached to Dark Charizard
+
+weakness resistance retreat cost
+
+Seemingly peaceful, it can burn all it sees.
+Ken Sugimori ©1995, 96, 98 Nintendo, Creatures, GAMEFREAK. ©1999 2000 Wizards 4/82`,
+			wantCardName:   "Dark Charizard",
+			wantCardNumber: "4",
+			wantSetCode:    "base5", // Team Rocket
+			wantIsWotC:     true,
+		},
+		{
+			name: "Neo Genesis Lugia - real Tesseract OCR",
+			input: `Elemental Blast Discard a
+Water Energy card, a Fire Energy
+card, and a Lightning Energy card 90
+attached to Lugia in order to
+use this attack.
+
+weakness resistance retreat cost
+
+It is said that it quietly spends its time deep at the bottom of
+the sea, because its powers are too strong. LV. 45 #249
+
+9/111
+Neo Genesis`,
+			wantCardName:   "Lugia",
+			wantCardNumber: "9",
+			wantSetCode:    "neo1", // Neo Genesis
+			wantIsWotC:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseOCRText(tt.input, "pokemon")
+
+			if result == nil {
+				t.Fatal("Result should not be nil")
+			}
+
+			if tt.wantCardName != "" && result.CardName != tt.wantCardName {
+				t.Errorf("CardName = %q, want %q", result.CardName, tt.wantCardName)
+			}
+
+			if tt.wantCardNumber != "" && result.CardNumber != tt.wantCardNumber {
+				t.Errorf("CardNumber = %q, want %q", result.CardNumber, tt.wantCardNumber)
+			}
+
+			if tt.wantSetCode != "" && result.SetCode != tt.wantSetCode {
+				t.Errorf("SetCode = %q, want %q", result.SetCode, tt.wantSetCode)
+			}
+
+			if result.IsWotCEra != tt.wantIsWotC {
+				t.Errorf("IsWotCEra = %v, want %v", result.IsWotCEra, tt.wantIsWotC)
+			}
+
+			t.Logf("Result: CardName=%q, CardNumber=%q, SetCode=%q, IsWotCEra=%v, Confidence=%.2f",
+				result.CardName, result.CardNumber, result.SetCode, result.IsWotCEra, result.Confidence)
+		})
+	}
+}
+
+// TestSetDetectionAllEras tests set detection across all Pokemon TCG eras
+func TestSetDetectionAllEras(t *testing.T) {
+	tests := []struct {
+		name           string
+		input          string
+		wantSetCode    string
+		wantCardNumber string
+		description    string
+	}{
+		// ==================== WotC Era (1999-2003) ====================
+		{
+			name:           "Base Set - by total 102",
+			input:          "Charizard\nHP 120\n4/102\n©1999 Wizards",
+			wantSetCode:    "base1",
+			wantCardNumber: "4",
+			description:    "Base Set via 102 total + Wizards copyright",
+		},
+		{
+			name:           "Jungle - by total 64",
+			input:          "Scyther\nHP 70\n10/64\n©1999 Wizards",
+			wantSetCode:    "base2",
+			wantCardNumber: "10",
+			description:    "Jungle via 64 total + Wizards copyright",
+		},
+		{
+			name:           "Fossil - by total 62",
+			input:          "Gengar\nHP 80\n5/62\n©1999 Wizards",
+			wantSetCode:    "base3",
+			wantCardNumber: "5",
+			description:    "Fossil via 62 total",
+		},
+		{
+			name:           "Team Rocket - by total 82",
+			input:          "Dark Charizard\nHP 80\n4/82\n©2000 Wizards",
+			wantSetCode:    "base5",
+			wantCardNumber: "4",
+			description:    "Team Rocket via 82 total",
+		},
+		{
+			name:           "Gym Heroes - by set name",
+			input:          "Lt. Surge's Electabuzz\nHP 70\nGym Heroes\n27/132",
+			wantSetCode:    "gym1",
+			wantCardNumber: "27",
+			description:    "Gym Heroes via set name",
+		},
+		{
+			name:           "Neo Genesis - by set name",
+			input:          "Lugia\nHP 90\nNeo Genesis\n9/111",
+			wantSetCode:    "neo1",
+			wantCardNumber: "9",
+			description:    "Neo Genesis via set name",
+		},
+		{
+			name:           "Neo Discovery - by set name",
+			input:          "Umbreon\nHP 70\nNeo Discovery\n32/75",
+			wantSetCode:    "neo2",
+			wantCardNumber: "32",
+			description:    "Neo Discovery via set name",
+		},
+		{
+			name:           "Neo Destiny - by total 113",
+			input:          "Shining Charizard\nHP 100\n107/113\n©2002 Wizards",
+			wantSetCode:    "neo4",
+			wantCardNumber: "107",
+			description:    "Neo Destiny via 113 total",
+		},
+
+		// ==================== EX Era (2003-2007) ====================
+		{
+			name:           "EX Ruby & Sapphire - by set name",
+			input:          "Blaziken\nHP 100\nRuby & Sapphire\n3/109",
+			wantSetCode:    "ex1",
+			wantCardNumber: "3",
+			description:    "EX Ruby & Sapphire via set name",
+		},
+		{
+			name:           "EX Dragon - by set name",
+			input:          "Rayquaza ex\nHP 100\nEX Dragon\n97/97",
+			wantSetCode:    "ex3",
+			wantCardNumber: "97",
+			description:    "EX Dragon via set name",
+		},
+		{
+			name:           "EX FireRed LeafGreen - by set name",
+			input:          "Charizard ex\nHP 160\nFireRed & LeafGreen\n105/112",
+			wantSetCode:    "ex6",
+			wantCardNumber: "105",
+			description:    "EX FireRed LeafGreen via set name",
+		},
+
+		// ==================== Diamond & Pearl Era (2007-2011) ====================
+		{
+			name:           "Diamond & Pearl - by set name",
+			input:          "Dialga\nHP 90\nDiamond & Pearl\n1/130",
+			wantSetCode:    "dp1",
+			wantCardNumber: "1",
+			description:    "Diamond & Pearl via set name",
+		},
+		{
+			name:           "Platinum - by set name",
+			input:          "Giratina\nHP 100\nPlatinum\n10/127",
+			wantSetCode:    "pl1",
+			wantCardNumber: "10",
+			description:    "Platinum via set name",
+		},
+
+		// ==================== HeartGold SoulSilver Era (2010-2011) ====================
+		{
+			name:           "HeartGold SoulSilver - by set name",
+			input:          "Lugia\nHP 100\nHeartGold & SoulSilver\n2/123",
+			wantSetCode:    "hgss1",
+			wantCardNumber: "2",
+			description:    "HGSS via set name",
+		},
+
+		// ==================== Black & White Era (2011-2014) ====================
+		{
+			name:           "Black & White - by set name",
+			input:          "Reshiram\nHP 130\nBlack & White\n26/114",
+			wantSetCode:    "bw1",
+			wantCardNumber: "26",
+			description:    "Black & White via set name",
+		},
+		{
+			name:           "Boundaries Crossed - by set name",
+			input:          "Charizard\nHP 160\nBoundaries Crossed\n20/149",
+			wantSetCode:    "bw7",
+			wantCardNumber: "20",
+			description:    "Boundaries Crossed via set name",
+		},
+
+		// ==================== XY Era (2014-2017) ====================
+		{
+			name:           "XY Base - by set code",
+			input:          "Xerneas EX\nHP 170\nXY\n97/146",
+			wantSetCode:    "xy1",
+			wantCardNumber: "97",
+			description:    "XY via set code in text",
+		},
+		{
+			name:           "Evolutions - by set name",
+			input:          "Charizard EX\nHP 180\nEvolutions\n12/108",
+			wantSetCode:    "xy12",
+			wantCardNumber: "12",
+			description:    "Evolutions via set name",
+		},
+
+		// ==================== Sun & Moon Era (2017-2020) ====================
+		{
+			name:           "Sun & Moon Base - by set name",
+			input:          "Solgaleo GX\nHP 250\nSun & Moon\n89/149",
+			wantSetCode:    "sm1",
+			wantCardNumber: "89",
+			description:    "Sun & Moon via set name",
+		},
+		{
+			name:           "Team Up - by set name",
+			input:          "Pikachu & Zekrom GX\nHP 240\nTeam Up\n33/181",
+			wantSetCode:    "sm9",
+			wantCardNumber: "33",
+			description:    "Team Up via set name",
+		},
+		{
+			name:           "Hidden Fates - by set name",
+			input:          "Charizard GX\nHP 250\nHidden Fates\n9/68",
+			wantSetCode:    "sm11pt5",
+			wantCardNumber: "9",
+			description:    "Hidden Fates via set name",
+		},
+
+		// ==================== Sword & Shield Era (2020-2023) ====================
+		{
+			name:           "Sword & Shield Base - by set code",
+			input:          "Zacian V\nHP 220\nSWSH1\n138/202",
+			wantSetCode:    "swsh1",
+			wantCardNumber: "138",
+			description:    "SWSH1 via explicit set code",
+		},
+		{
+			name:           "Vivid Voltage - by total 185",
+			input:          "Pikachu VMAX\nHP 310\n044/185",
+			wantSetCode:    "swsh4",
+			wantCardNumber: "44",
+			description:    "Vivid Voltage via 185 total",
+		},
+		{
+			name:           "Evolving Skies - by set name",
+			input:          "Umbreon VMAX\nHP 320\nEvolving Skies\n215/203",
+			wantSetCode:    "swsh7",
+			wantCardNumber: "215",
+			description:    "Evolving Skies via set name",
+		},
+		{
+			name:           "Brilliant Stars - by set name",
+			input:          "Charizard VSTAR\nHP 280\nBrilliant Stars\nTG03/TG30",
+			wantSetCode:    "swsh9",
+			wantCardNumber: "TG03",
+			description:    "Brilliant Stars via set name",
+		},
+		{
+			name:           "Crown Zenith - by set name",
+			input:          "Arceus VSTAR\nHP 280\nCrown Zenith\nGG70/GG70",
+			wantSetCode:    "swsh12pt5",
+			wantCardNumber: "GG70",
+			description:    "Crown Zenith via set name",
+		},
+
+		// ==================== Scarlet & Violet Era (2023+) ====================
+		{
+			name:           "Scarlet & Violet Base - by set code",
+			input:          "Koraidon ex\nHP 230\nSV1\n125/198",
+			wantSetCode:    "sv1",
+			wantCardNumber: "125",
+			description:    "SV1 via explicit set code",
+		},
+		{
+			name:           "Paldea Evolved - by set name",
+			input:          "Chien-Pao ex\nHP 220\nPaldea Evolved\n61/193",
+			wantSetCode:    "sv2",
+			wantCardNumber: "61",
+			description:    "Paldea Evolved via set name",
+		},
+		{
+			name:           "Obsidian Flames - by set name",
+			input:          "Charizard ex\nHP 330\nObsidian Flames\n125/197",
+			wantSetCode:    "sv3",
+			wantCardNumber: "125",
+			description:    "Obsidian Flames via set name",
+		},
+		{
+			name:           "151 - by set name",
+			input:          "Charizard ex\nHP 330\n151\n6/165",
+			wantSetCode:    "sv3pt5",
+			wantCardNumber: "6",
+			description:    "151 via set name",
+		},
+		{
+			name:           "Temporal Forces - by set name",
+			input:          "Walking Wake ex\nHP 220\nTemporal Forces\n25/162",
+			wantSetCode:    "sv5",
+			wantCardNumber: "25",
+			description:    "Temporal Forces via set name",
+		},
+		{
+			name:           "Shrouded Fable - by set name",
+			input:          "Kingdra ex\nHP 320\nShrouded Fable\n35/64",
+			wantSetCode:    "sv6pt5",
+			wantCardNumber: "35",
+			description:    "Shrouded Fable via set name",
+		},
+
+		// ==================== Ambiguous Totals - WotC Era Priority ====================
+		{
+			name:           "Ambiguous 102 - Base Set with Wizards",
+			input:          "Raichu\nHP 80\n14/102\n©1999 Wizards of the Coast",
+			wantSetCode:    "base1", // Not HGSS Triumphant
+			wantCardNumber: "14",
+			description:    "102 total + Wizards = Base Set, not HGSS Triumphant",
+		},
+		{
+			name:           "Ambiguous 102 - HGSS Triumphant without Wizards",
+			input:          "Magnezone Prime\nHP 140\n96/102\nTriumphant",
+			wantSetCode:    "hgss4",
+			wantCardNumber: "96",
+			description:    "102 total + Triumphant set name = HGSS Triumphant",
+		},
+
+		// ==================== PTCGO Codes ====================
+		{
+			name:           "PTCGO code BS - Base Set",
+			input:          "Pikachu\nHP 40\nBS 58/102",
+			wantSetCode:    "base1",
+			wantCardNumber: "58",
+			description:    "BS PTCGO code = Base Set",
+		},
+		{
+			name:           "PTCGO code JU - Jungle",
+			input:          "Jolteon\nHP 70\nJU 4/64",
+			wantSetCode:    "base2",
+			wantCardNumber: "4",
+			description:    "JU PTCGO code = Jungle",
+		},
+		{
+			name:           "PTCGO code FO - Fossil",
+			input:          "Aerodactyl\nHP 60\nFO 1/62",
+			wantSetCode:    "base3",
+			wantCardNumber: "1",
+			description:    "FO PTCGO code = Fossil",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseOCRText(tt.input, "pokemon")
+
+			if result == nil {
+				t.Fatal("Result should not be nil")
+			}
+
+			if result.SetCode != tt.wantSetCode {
+				t.Errorf("SetCode = %q, want %q (%s)", result.SetCode, tt.wantSetCode, tt.description)
+			}
+
+			if tt.wantCardNumber != "" && result.CardNumber != tt.wantCardNumber {
+				t.Errorf("CardNumber = %q, want %q", result.CardNumber, tt.wantCardNumber)
+			}
+
+			t.Logf("[%s] SetCode=%q, CardNumber=%q, Confidence=%.2f",
+				tt.description, result.SetCode, result.CardNumber, result.Confidence)
+		})
+	}
+}
+
+// TestFullCardOCRInputs tests complete OCR outputs from real card scans
+// These simulate the full text you'd get from scanning an actual Pokemon card
+func TestFullCardOCRInputs(t *testing.T) {
+	tests := []struct {
+		name           string
+		input          string
+		wantCardName   string
+		wantCardNumber string
+		wantSetCode    string
+		wantHP         string
+		wantIsWotC     bool
+		wantIsFoil     bool
+		minConfidence  float64
+	}{
+		// ==================== Base Set Era Full Cards ====================
+		{
+			name: "Base Set Charizard - Complete Card Text",
+			input: `Charizard
+HP 120
+Stage 2 Evolves from Charmeleon
+
+Pokémon Power: Energy Burn
+As often as you like during your turn (before your attack), you may turn all Energy attached to Charizard into Fire Energy for the rest of the turn. This power can't be used if Charizard is Asleep, Confused, or Paralyzed.
+
+Fire Spin                                    100
+Discard 2 Energy cards attached to Charizard in order to use this attack.
+
+weakness        resistance       retreat cost
+Water           Fighting -30     ★★★
+
+Spits fire that is hot enough to melt boulders. Known to cause forest fires unintentionally. LV. 76 #6
+
+Illus. Mitsuhiro Arita                       4/102
+©1995, 96, 98, 99 Nintendo, Creatures, GAMEFREAK. ©1999 Wizards.`,
+			wantCardName:   "Charizard",
+			wantCardNumber: "4",
+			wantSetCode:    "base1",
+			wantHP:         "120",
+			wantIsWotC:     true,
+			wantIsFoil:     false,
+			minConfidence:  0.9,
+		},
+		{
+			name: "Jungle Scyther - Complete Card Text",
+			input: `Scyther
+HP 70
+Basic Pokémon
+
+Swords Dance
+During your next turn, Scyther's Slash attack's base damage is 60 instead of 30.
+
+Slash                                        30
+
+weakness        resistance       retreat cost
+Fire            Fighting -30
+
+With ninja-like agility and speed, it can create the illusion that there is more than one of it. LV. 25 #123
+
+Illus. Ken Sugimori                          10/64
+©1995, 96, 98, 99 Nintendo, Creatures, GAMEFREAK. ©1999 Wizards.`,
+			wantCardName:   "Scyther",
+			wantCardNumber: "10",
+			wantSetCode:    "base2",
+			wantHP:         "70",
+			wantIsWotC:     true,
+			wantIsFoil:     false,
+			minConfidence:  0.9,
+		},
+		{
+			name: "Fossil Gengar - Complete Card Text",
+			input: `Gengar
+HP 80
+Stage 2 Evolves from Haunter
+
+Pokémon Power: Curse
+Once during your turn (before your attack), you may move 1 damage counter from 1 of your opponent's Pokémon to another (even if it would Knock Out the other Pokémon). This power can't be used if Gengar is Asleep, Confused, or Paralyzed.
+
+Dark Mind                                    30
+If your opponent has any Benched Pokémon, choose 1 of them and this attack does 10 damage to it. (Don't apply Weakness and Resistance for Benched Pokémon.)
+
+weakness        resistance       retreat cost
+None            Fighting -30     ★
+
+Under a full moon, this Pokémon likes to mimic the shadows of people and laugh at their fright. LV. 38 #94
+
+Illus. Keiji Kinebuchi                       5/62
+©1995, 96, 98, 99 Nintendo, Creatures, GAMEFREAK. ©1999 Wizards.`,
+			wantCardName:   "Gengar",
+			wantCardNumber: "5",
+			wantSetCode:    "base3",
+			wantHP:         "80",
+			wantIsWotC:     true,
+			wantIsFoil:     false,
+			minConfidence:  0.9,
+		},
+		{
+			name: "Team Rocket Dark Charizard - Complete Card Text",
+			input: `Dark Charizard
+HP 80
+Stage 2 Evolves from Dark Charmeleon
+
+Nail Flick                                   10
+
+Continuous Fireball                          50×
+Flip a number of coins equal to the number of Fire Energy cards attached to Dark Charizard. This attack does 50 damage times the number of heads. Discard a number of Fire Energy cards attached to Dark Charizard equal to the number of heads.
+
+weakness        resistance       retreat cost
+Water           Fighting -30     ★★★
+
+Illus. Ken Sugimori                          4/82
+©1995, 96, 98, 99 Nintendo, Creatures, GAMEFREAK. ©2000 Wizards.`,
+			wantCardName:   "Dark Charizard",
+			wantCardNumber: "4",
+			wantSetCode:    "base5",
+			wantHP:         "80",
+			wantIsWotC:     true,
+			wantIsFoil:     false,
+			minConfidence:  0.9,
+		},
+		{
+			name: "Neo Genesis Lugia - Complete Card Text",
+			input: `Lugia
+HP 90
+Basic Pokémon
+
+Elemental Blast                              90
+Discard a Water Energy card, a Fire Energy card, and a Lightning Energy card attached to Lugia in order to use this attack.
+
+weakness        resistance       retreat cost
+Psychic         Fighting -30     ★★
+
+It is said that it quietly spends its time deep at the bottom of the sea because its powers are too strong. LV. 45 #249
+
+Illus. Hironobu Yoshida                      9/111
+Neo Genesis`,
+			wantCardName:   "Lugia",
+			wantCardNumber: "9",
+			wantSetCode:    "neo1",
+			wantHP:         "90",
+			wantIsWotC:     true,
+			wantIsFoil:     false,
+			minConfidence:  0.9,
+		},
+		{
+			name: "1st Edition Base Set Alakazam",
+			input: `Alakazam
+HP 80
+Stage 2 Evolves from Kadabra
+
+Pokémon Power: Damage Swap
+As often as you like during your turn (before your attack), you may move 1 damage counter from 1 of your Pokémon to another as long as you don't Knock Out that Pokémon. This power can't be used if Alakazam is Asleep, Confused, or Paralyzed.
+
+Confuse Ray                                  30
+Flip a coin. If heads, the Defending Pokémon is now Confused.
+
+weakness        resistance       retreat cost
+Psychic                          ★★★
+
+Its brain can outperform a supercomputer. Its intelligence quotient is said to be 5000. LV. 42 #65
+
+1ST EDITION
+Illus. Ken Sugimori                          1/102
+©1999 Wizards`,
+			wantCardName:   "Alakazam",
+			wantCardNumber: "1",
+			wantSetCode:    "base1",
+			wantHP:         "80",
+			wantIsWotC:     true,
+			wantIsFoil:     false,
+			minConfidence:  0.9,
+		},
+
+		// ==================== Modern Era Full Cards ====================
+		{
+			name: "Vivid Voltage Pikachu VMAX - Complete Card Text",
+			input: `Pikachu VMAX
+HP 310
+VMAX Evolves from Pikachu V
+
+G-Max Volt Tackle                            120
+You may discard all Lightning Energy from this Pokémon. If you do, this attack does 150 more damage.
+
+VMAX rule
+When your Pokémon VMAX is Knocked Out, your opponent takes 3 Prize cards.
+
+weakness        resistance       retreat cost
+Fighting ×2                      ★★★
+
+Illus. aky CG Works                          044/185
+SWSH Vivid Voltage
+©2020 Pokémon`,
+			wantCardName:   "Pikachu VMAX",
+			wantCardNumber: "44",
+			wantSetCode:    "swsh4",
+			wantHP:         "310",
+			wantIsWotC:     false,
+			wantIsFoil:     false,
+			minConfidence:  0.9,
+		},
+		{
+			name: "Brilliant Stars Charizard VSTAR - Complete Card Text",
+			input: `Charizard VSTAR
+HP 280
+VSTAR Evolves from Charizard V
+
+Explosive Fire                               130+
+This attack does 100 more damage for each of your Benched Pokémon V.
+
+VSTAR Power
+★ Star Blaze                                 320
+Discard 2 Energy from this Pokémon.
+
+VSTAR rule
+When your Pokémon VSTAR is Knocked Out, your opponent takes 2 Prize cards.
+
+weakness        resistance       retreat cost
+Water ×2                         ★★★
+
+Illus. 5ban Graphics                         TG03/TG30
+SWSH Brilliant Stars
+©2022 Pokémon`,
+			wantCardName:   "Charizard VSTAR",
+			wantCardNumber: "TG03",
+			wantSetCode:    "swsh9",
+			wantHP:         "280",
+			wantIsWotC:     false,
+			wantIsFoil:     false,
+			minConfidence:  0.9,
+		},
+		{
+			name: "Paldea Evolved Chien-Pao ex - Complete Card Text",
+			input: `Chien-Pao ex
+HP 220
+Basic Pokémon
+
+Ability: Shivery Chill
+Once during your turn, if this Pokémon is in the Active Spot, you may search your deck for up to 2 Basic Water Energy cards, reveal them, and put them into your hand. Then, shuffle your deck.
+
+Hail Blade                                   60×
+You may discard any amount of Water Energy from your Pokémon. This attack does 60 damage for each card you discarded in this way.
+
+Pokémon ex rule
+When your Pokémon ex is Knocked Out, your opponent takes 2 Prize cards.
+
+weakness        resistance       retreat cost
+Metal ×2                         ★★
+
+Illus. 5ban Graphics                         61/193
+Paldea Evolved
+©2023 Pokémon`,
+			wantCardName:   "Chien-Pao ex",
+			wantCardNumber: "61",
+			wantSetCode:    "sv2",
+			wantHP:         "220",
+			wantIsWotC:     false,
+			wantIsFoil:     false,
+			minConfidence:  0.9,
+		},
+		{
+			name: "151 Charizard ex - Complete Card Text",
+			input: `Charizard ex
+HP 330
+Stage 2 Evolves from Charmeleon
+
+Ability: Infernal Reign
+When you play this Pokémon from your hand to evolve 1 of your Pokémon during your turn, you may search your deck for up to 3 Basic Fire Energy cards and attach them to your Pokémon in any way you like. Then, shuffle your deck.
+
+Burning Dark                                 180
+This attack does 30 more damage for each Prize card your opponent has taken.
+
+Pokémon ex rule
+When your Pokémon ex is Knocked Out, your opponent takes 2 Prize cards.
+
+weakness        resistance       retreat cost
+Water ×2                         ★★★
+
+Illus. PLANETA Mochizuki                     6/165
+151
+©2023 Pokémon`,
+			wantCardName:   "Charizard ex",
+			wantCardNumber: "6",
+			wantSetCode:    "sv3pt5",
+			wantHP:         "330",
+			wantIsWotC:     false,
+			wantIsFoil:     false,
+			minConfidence:  0.9,
+		},
+
+		// ==================== Middle Era Full Cards ====================
+		{
+			name: "EX Ruby Sapphire Blaziken - Complete Card Text",
+			input: `Blaziken
+HP 100
+Stage 2 Evolves from Combusken
+
+Poké-BODY: Blaze
+As long as Blaziken's remaining HP is 40 or less, Blaziken does 40 more damage to the Defending Pokémon (before applying Weakness and Resistance).
+
+Fire Stream                                  50
+Discard a Fire Energy card attached to Blaziken. This attack does 10 damage to each of your opponent's Benched Pokémon. (Don't apply Weakness and Resistance for Benched Pokémon.)
+
+weakness        resistance       retreat cost
+Water           Psychic          ★★
+
+Illus. Kouki Saitou                          3/109
+EX Ruby & Sapphire`,
+			wantCardName:   "Blaziken",
+			wantCardNumber: "3",
+			wantSetCode:    "ex1",
+			wantHP:         "100",
+			wantIsWotC:     false,
+			wantIsFoil:     false,
+			minConfidence:  0.9,
+		},
+		{
+			name: "XY Evolutions Charizard EX - Complete Card Text",
+			input: `Charizard EX
+HP 180
+Basic Pokémon
+
+Stoke
+Flip a coin. If heads, search your deck for up to 3 basic Energy cards and attach them to this Pokémon. Shuffle your deck afterward.
+
+Fire Blast                                   120
+Discard an Energy attached to this Pokémon.
+
+Pokémon-EX rule
+When a Pokémon-EX has been Knocked Out, your opponent takes 2 Prize cards.
+
+weakness        resistance       retreat cost
+Water ×2                         ★★★
+
+Illus. Mitsuhiro Arita                       12/108
+XY Evolutions
+©2016 Pokémon`,
+			wantCardName:   "Charizard EX",
+			wantCardNumber: "12",
+			wantSetCode:    "xy12",
+			wantHP:         "180",
+			wantIsWotC:     false,
+			wantIsFoil:     false,
+			minConfidence:  0.9,
+		},
+		{
+			name: "Sun Moon Hidden Fates Charizard GX - Complete Card Text",
+			input: `Charizard GX
+HP 250
+Stage 2 Evolves from Charmeleon
+
+Flare Blitz                                  160
+Discard all Fire Energy from this Pokémon.
+
+Crimson Storm GX                             300
+Discard 3 Fire Energy from this Pokémon. (You can't use more than 1 GX attack in a game.)
+
+When your Pokémon-GX is Knocked Out, your opponent takes 2 Prize cards.
+
+weakness        resistance       retreat cost
+Water ×2                         ★★★
+
+Illus. PLANETA Tsuji                         SV49/SV94
+Hidden Fates Shiny Vault`,
+			wantCardName:   "Charizard GX",
+			wantCardNumber: "SV49",
+			wantSetCode:    "sm11pt5",
+			wantHP:         "250",
+			wantIsWotC:     false,
+			wantIsFoil:     false,
+			minConfidence:  0.9,
+		},
+
+		// ==================== Edge Cases and Noisy OCR ====================
+		{
+			name: "Noisy OCR - Base Set Pikachu with artifacts",
+			input: `P1kachu
+HP 40
+Bas1c Pokémon
+
+Gnaw                                         l0
+
+Thunder Jo1t                                 30
+F1ip a coin. If tails, Pikachu does l0 damage to itself.
+
+weakness        res1stance       retreat cost
+F1ghting
+
+When several of these Pokémon gather, their e1ectricity can cause l1ghtning storms. LV. l2 #25
+
+Illus. M1tsuhiro Arita                       58/l02
+©l999 W1zards`,
+			wantCardName:   "Pikachu",
+			wantCardNumber: "58",
+			wantSetCode:    "base1",
+			wantHP:         "40",
+			wantIsWotC:     true,
+			wantIsFoil:     false,
+			minConfidence:  0.5,
+		},
+		{
+			name: "Partial OCR - Missing card name line",
+			input: `HP 120
+Stage 2 Evolves from Charmeleon
+
+Fire Spin                                    100
+Discard 2 Energy cards attached to Charizard in order to use this attack.
+
+weakness        resistance       retreat cost
+Water           Fighting -30     ★★★
+
+4/102
+©1999 Wizards`,
+			wantCardName:   "Charizard",
+			wantCardNumber: "4",
+			wantSetCode:    "base1",
+			wantHP:         "120",
+			wantIsWotC:     true,
+			wantIsFoil:     false,
+			minConfidence:  0.5,
+		},
+		{
+			name: "Holo Card - Explicit Holo Rare marking",
+			input: `Charizard
+HP 120
+Stage 2
+
+Holo Rare
+
+Fire Spin                                    100
+
+4/102
+©1999 Wizards`,
+			wantCardName:   "Charizard",
+			wantCardNumber: "4",
+			wantSetCode:    "base1",
+			wantHP:         "120",
+			wantIsWotC:     true,
+			wantIsFoil:     true, // Holo Rare should trigger foil
+			minConfidence:  0.7,
+		},
+		{
+			name: "Reverse Holo Modern Card",
+			input: `Pikachu
+HP 60
+Basic Pokémon
+
+Reverse Holo
+
+Quick Attack                                 30+
+Flip a coin. If heads, this attack does 30 more damage.
+
+025/185
+SWSH Vivid Voltage`,
+			wantCardName:   "Pikachu",
+			wantCardNumber: "25",
+			wantSetCode:    "swsh4",
+			wantHP:         "60",
+			wantIsWotC:     false,
+			wantIsFoil:     true, // Reverse Holo should trigger foil
+			minConfidence:  0.7,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseOCRText(tt.input, "pokemon")
+
+			if result == nil {
+				t.Fatal("Result should not be nil")
+			}
+
+			// Check card name
+			if tt.wantCardName != "" && result.CardName != tt.wantCardName {
+				t.Errorf("CardName = %q, want %q", result.CardName, tt.wantCardName)
+			}
+
+			// Check card number
+			if tt.wantCardNumber != "" && result.CardNumber != tt.wantCardNumber {
+				t.Errorf("CardNumber = %q, want %q", result.CardNumber, tt.wantCardNumber)
+			}
+
+			// Check set code
+			if tt.wantSetCode != "" && result.SetCode != tt.wantSetCode {
+				t.Errorf("SetCode = %q, want %q", result.SetCode, tt.wantSetCode)
+			}
+
+			// Check HP
+			if tt.wantHP != "" && result.HP != tt.wantHP {
+				t.Errorf("HP = %q, want %q", result.HP, tt.wantHP)
+			}
+
+			// Check WotC era
+			if result.IsWotCEra != tt.wantIsWotC {
+				t.Errorf("IsWotCEra = %v, want %v", result.IsWotCEra, tt.wantIsWotC)
+			}
+
+			// Check foil detection
+			if result.IsFoil != tt.wantIsFoil {
+				t.Errorf("IsFoil = %v, want %v (indicators: %v)", result.IsFoil, tt.wantIsFoil, result.FoilIndicators)
+			}
+
+			// Check confidence
+			if tt.minConfidence > 0 && result.Confidence < tt.minConfidence {
+				t.Errorf("Confidence = %.2f, want >= %.2f", result.Confidence, tt.minConfidence)
+			}
+
+			t.Logf("Result: Name=%q, Number=%q, Set=%q, HP=%q, WotC=%v, Foil=%v, Conf=%.2f",
+				result.CardName, result.CardNumber, result.SetCode, result.HP,
+				result.IsWotCEra, result.IsFoil, result.Confidence)
 		})
 	}
 }

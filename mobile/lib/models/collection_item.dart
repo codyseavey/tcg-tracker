@@ -7,6 +7,7 @@ class CollectionItem {
   final int quantity;
   final String condition;
   final bool foil;
+  final bool firstEdition;
   final String? notes;
   final DateTime addedAt;
 
@@ -17,6 +18,7 @@ class CollectionItem {
     required this.quantity,
     required this.condition,
     required this.foil,
+    this.firstEdition = false,
     this.notes,
     required this.addedAt,
   });
@@ -29,6 +31,7 @@ class CollectionItem {
       quantity: json['quantity'] ?? 1,
       condition: json['condition'] ?? 'NM',
       foil: json['foil'] ?? false,
+      firstEdition: json['first_edition'] ?? false,
       notes: json['notes'],
       addedAt: json['added_at'] != null
           ? DateTime.parse(json['added_at'])
@@ -64,6 +67,7 @@ class CollectionItem {
     int? quantity,
     String? condition,
     bool? foil,
+    bool? firstEdition,
     String? notes,
     DateTime? addedAt,
   }) {
@@ -74,6 +78,7 @@ class CollectionItem {
       quantity: quantity ?? this.quantity,
       condition: condition ?? this.condition,
       foil: foil ?? this.foil,
+      firstEdition: firstEdition ?? this.firstEdition,
       notes: notes ?? this.notes,
       addedAt: addedAt ?? this.addedAt,
     );

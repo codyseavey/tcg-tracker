@@ -132,6 +132,7 @@ class CollectionProvider extends ChangeNotifier {
     int quantity = 1,
     String condition = 'NM',
     bool foil = false,
+    bool firstEdition = false,
   }) async {
     try {
       final item = await _apiService.addToCollection(
@@ -139,6 +140,7 @@ class CollectionProvider extends ChangeNotifier {
         quantity: quantity,
         condition: condition,
         foil: foil,
+        firstEdition: firstEdition,
       );
       // Add to local list or update existing
       final existingIndex = _items.indexWhere((i) => i.id == item.id);
@@ -160,6 +162,7 @@ class CollectionProvider extends ChangeNotifier {
     int? quantity,
     String? condition,
     bool? foil,
+    bool? firstEdition,
     String? notes,
   }) async {
     try {
@@ -168,6 +171,7 @@ class CollectionProvider extends ChangeNotifier {
         quantity: quantity,
         condition: condition,
         foil: foil,
+        firstEdition: firstEdition,
         notes: notes,
       );
       final index = _items.indexWhere((i) => i.id == id);

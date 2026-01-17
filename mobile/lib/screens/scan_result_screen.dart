@@ -26,6 +26,7 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
   int _quantity = 1;
   late String _condition;
   late bool _foil;
+  late bool _firstEdition;
   bool _isAdding = false;
 
   // Use unified condition codes from constants
@@ -35,10 +36,14 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
   void initState() {
     super.initState();
     _apiService = widget.apiService ?? ApiService();
-    // Pre-fill foil based on scan detection (text or image analysis)
-    _foil = widget.scanMetadata?.isFoil ?? false;
+    // Conservative foil pre-fill: only if high confidence (>= 0.8) or explicit isFoil from text
+    final meta = widget.scanMetadata;
+    final foilConfidence = meta?.foilConfidence ?? 0;
+    _foil = (foilConfidence >= 0.8) || (meta?.isFoil ?? false);
+    // Pre-fill first edition from detection
+    _firstEdition = meta?.isFirstEdition ?? false;
     // Pre-fill condition based on image analysis suggested condition
-    final suggested = widget.scanMetadata?.suggestedCondition;
+    final suggested = meta?.suggestedCondition;
     _condition = (suggested != null && _conditions.contains(suggested)) ? suggested : 'NM';
   }
 
@@ -51,6 +56,7 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
         quantity: _quantity,
         condition: _condition,
         foil: _foil,
+        firstEdition: _firstEdition,
       );
 
       if (!mounted) return;
@@ -163,7 +169,8 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
                   title: Row(
                     children: [
                       const Text('Foil'),
-                      if (widget.scanMetadata?.isFoil == true) ...[
+                      if (widget.scanMetadata?.isFoil == true ||
+                          (widget.scanMetadata?.foilConfidence ?? 0) >= 0.5) ...[
                         const SizedBox(width: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(
@@ -171,14 +178,20 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
                             vertical: 2,
                           ),
                           decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.tertiaryContainer,
+                            color: (widget.scanMetadata?.foilConfidence ?? 0) >= 0.8
+                                ? Theme.of(context).colorScheme.tertiaryContainer
+                                : Colors.amber.shade100,
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: Text(
-                            'Detected',
+                            (widget.scanMetadata?.foilConfidence ?? 0) >= 0.8
+                                ? 'Detected'
+                                : 'Maybe (${((widget.scanMetadata?.foilConfidence ?? 0) * 100).toInt()}%)',
                             style: TextStyle(
                               fontSize: 12,
-                              color: Theme.of(context).colorScheme.onTertiaryContainer,
+                              color: (widget.scanMetadata?.foilConfidence ?? 0) >= 0.8
+                                  ? Theme.of(context).colorScheme.onTertiaryContainer
+                                  : Colors.amber.shade900,
                             ),
                           ),
                         ),
@@ -187,6 +200,36 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
                   ),
                   value: _foil,
                   onChanged: (value) => setModalState(() => _foil = value),
+                ),
+                // First Edition toggle (mainly for Pokemon Base Set era)
+                SwitchListTile(
+                  title: Row(
+                    children: [
+                      const Text('1st Edition'),
+                      if (widget.scanMetadata?.isFirstEdition == true) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.shade700,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Text(
+                            'Detected',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  value: _firstEdition,
+                  onChanged: (value) => setModalState(() => _firstEdition = value),
                 ),
                 const SizedBox(height: 16),
                 FilledButton(
@@ -288,6 +331,21 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
                     label: Text(indicator, style: const TextStyle(fontSize: 10)),
                     visualDensity: VisualDensity.compact,
                     backgroundColor: Colors.amber.shade100,
+                    padding: EdgeInsets.zero,
+                  );
+                }).toList(),
+              ),
+            ],
+            if (meta.firstEdIndicators.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Wrap(
+                spacing: 4,
+                children: meta.firstEdIndicators.map((indicator) {
+                  return Chip(
+                    label: Text(indicator, style: const TextStyle(fontSize: 10)),
+                    visualDensity: VisualDensity.compact,
+                    backgroundColor: Colors.amber.shade700,
+                    labelStyle: const TextStyle(color: Colors.white, fontSize: 10),
                     padding: EdgeInsets.zero,
                   );
                 }).toList(),

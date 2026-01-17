@@ -2,6 +2,7 @@ package services
 
 import (
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -17,7 +18,8 @@ func parseInt(s string) int {
 
 // OCRResult contains parsed information from OCR text
 type OCRResult struct {
-	FoilIndicators     []string           `json:"foil_indicators"` // what triggered foil detection
+	FoilIndicators     []string           `json:"foil_indicators"`     // what triggered foil detection
+	FirstEdIndicators  []string           `json:"first_ed_indicators"` // what triggered first edition detection
 	AllLines           []string           `json:"all_lines"`
 	ConditionHints     []string           `json:"condition_hints"` // hints about card condition
 	RawText            string             `json:"raw_text"`
@@ -29,11 +31,13 @@ type OCRResult struct {
 	HP                 string             `json:"hp"`                   // e.g., "170" from "HP 170"
 	Rarity             string             `json:"rarity"`               // if detected
 	Confidence         float64            `json:"confidence"`           // 0-1 based on how much we extracted
-	IsFoil             bool               `json:"is_foil"`              // detected foil indicators
+	IsFoil             bool               `json:"is_foil"`              // detected foil indicators (conservative)
+	IsFirstEdition     bool               `json:"is_first_edition"`     // detected first edition
+	IsWotCEra          bool               `json:"is_wotc_era"`          // detected Wizards of the Coast era card
 	SuggestedCondition string             `json:"suggested_condition"`  // from image analysis
 	EdgeWhiteningScore float64            `json:"edge_whitening_score"` // from image analysis
 	CornerScores       map[string]float64 `json:"corner_scores"`        // from image analysis
-	FoilConfidence     float64            `json:"foil_confidence"`      // from image analysis
+	FoilConfidence     float64            `json:"foil_confidence"`      // 0-1 confidence from text/image analysis
 }
 
 // ImageAnalysis contains results from client-side image analysis
@@ -51,12 +55,12 @@ const maxOCRTextLength = 10000
 // Pokemon TCG set name to set code mapping
 var pokemonSetNameToCode = map[string]string{
 	// Scarlet & Violet Era
-	"SCARLET & VIOLET":     "sv1",
-	"SCARLET AND VIOLET":   "sv1",
-	"PALDEA EVOLVED":       "sv2",
-	"OBSIDIAN FLAMES":      "sv3",
-	"151":                  "sv3pt5",
-	"MEW":                  "sv3pt5",
+	"SCARLET & VIOLET":   "sv1",
+	"SCARLET AND VIOLET": "sv1",
+	"PALDEA EVOLVED":     "sv2",
+	"OBSIDIAN FLAMES":    "sv3",
+	"151":                "sv3pt5",
+	// Note: "MEW" removed as it matches "MEWTWO" - use "151" for sv3pt5 detection
 	"PARADOX RIFT":         "sv4",
 	"PALDEAN FATES":        "sv4pt5",
 	"TEMPORAL FORCES":      "sv5",
@@ -134,6 +138,97 @@ var pokemonSetNameToCode = map[string]string{
 	"PLASMA FREEZE":       "bw9",
 	"PLASMA BLAST":        "bw10",
 	"LEGENDARY TREASURES": "bw11",
+
+	// HeartGold & SoulSilver Era
+	"HEARTGOLD & SOULSILVER": "hgss1",
+	"HEARTGOLD SOULSILVER":   "hgss1",
+	"HGSS":                   "hgss1",
+	"UNLEASHED":              "hgss2",
+	"UNDAUNTED":              "hgss3",
+	"TRIUMPHANT":             "hgss4",
+	"CALL OF LEGENDS":        "col1",
+
+	// Diamond & Pearl Era
+	"DIAMOND & PEARL":      "dp1",
+	"DIAMOND AND PEARL":    "dp1",
+	"MYSTERIOUS TREASURES": "dp2",
+	"SECRET WONDERS":       "dp3",
+	"GREAT ENCOUNTERS":     "dp4",
+	"MAJESTIC DAWN":        "dp5",
+	"LEGENDS AWAKENED":     "dp6",
+	"STORMFRONT":           "dp7",
+	"PLATINUM":             "pl1",
+	"RISING RIVALS":        "pl2",
+	"SUPREME VICTORS":      "pl3",
+	"ARCEUS":               "pl4",
+
+	// EX Era (Ruby & Sapphire through Power Keepers)
+	"RUBY & SAPPHIRE":         "ex1",
+	"RUBY AND SAPPHIRE":       "ex1",
+	"SANDSTORM":               "ex2",
+	"EX DRAGON":               "ex3", // Avoid matching "Dragon" alone (too common)
+	"TEAM MAGMA VS TEAM AQUA": "ex4",
+	"HIDDEN LEGENDS":          "ex5",
+	"FIRERED & LEAFGREEN":     "ex6",
+	"TEAM ROCKET RETURNS":     "ex7",
+	"DEOXYS":                  "ex8",
+	"EMERALD":                 "ex9",
+	"UNSEEN FORCES":           "ex10",
+	"DELTA SPECIES":           "ex11",
+	"LEGEND MAKER":            "ex12",
+	"HOLON PHANTOMS":          "ex13",
+	"CRYSTAL GUARDIANS":       "ex14",
+	"DRAGON FRONTIERS":        "ex15",
+	"POWER KEEPERS":           "ex16",
+
+	// Base Era (Original WotC Sets)
+	"BASE SET": "base1",
+	// Note: "BASE" alone is not included as it's too ambiguous
+	// (matches "base damage", "base attack", etc. in card text)
+	"JUNGLE":               "base2",
+	"FOSSIL":               "base3",
+	"BASE SET 2":           "base4",
+	"TEAM ROCKET":          "base5",
+	"LEGENDARY COLLECTION": "base6",
+	"GYM HEROES":           "gym1",
+	"GYM CHALLENGE":        "gym2",
+	"NEO GENESIS":          "neo1",
+	"NEO DISCOVERY":        "neo2",
+	"NEO REVELATION":       "neo3",
+	"NEO DESTINY":          "neo4",
+	"EXPEDITION":           "ecard1",
+	"AQUAPOLIS":            "ecard2",
+	"SKYRIDGE":             "ecard3",
+
+	// WotC Promo
+	"WIZARDS BLACK STAR": "basep",
+	"WOTC PROMO":         "basep",
+	"BLACK STAR PROMO":   "basep",
+}
+
+// Pokemon TCG PTCGO codes to set code mapping
+// These 2-letter codes appear on physical cards (bottom left/right) for online redemption
+var pokemonPTCGOToCode = map[string]string{
+	// Base Era
+	"BS": "base1", // Base Set
+	"JU": "base2", // Jungle
+	"FO": "base3", // Fossil
+	"B2": "base4", // Base Set 2
+	"TR": "base5", // Team Rocket
+	"LC": "base6", // Legendary Collection
+	"G1": "gym1",  // Gym Heroes
+	"G2": "gym2",  // Gym Challenge
+	"N1": "neo1",  // Neo Genesis
+	"N2": "neo2",  // Neo Discovery
+	"N3": "neo3",  // Neo Revelation
+	"N4": "neo4",  // Neo Destiny
+	"SI": "si1",   // Southern Islands
+	// e-Card Era
+	// Note: "EX" removed as it conflicts with modern "ex" suffix (Koraidon ex, etc.)
+	// Use set name "EXPEDITION" or set total detection instead
+	"AQ": "ecard2", // Aquapolis
+	"SK": "ecard3", // Skyridge
+	// Note: Modern sets use different codes (e.g., SVI for Scarlet & Violet)
 }
 
 // Pokemon TCG set total to possible set codes mapping
@@ -141,16 +236,16 @@ var pokemonSetNameToCode = map[string]string{
 // Note: Some totals are shared between sets, those are listed with multiple options
 var pokemonSetTotalToCode = map[string][]string{
 	// Scarlet & Violet Era - unique totals
-	"193": {"sv2"},    // Paldea Evolved (193 cards)
-	"197": {"sv3"},    // Obsidian Flames (197 cards)
-	"165": {"sv3pt5"}, // 151 (165 cards including secrets)
+	"193": {"sv2"}, // Paldea Evolved (193 cards)
+	"197": {"sv3"}, // Obsidian Flames (197 cards)
+	// "165" handled below (151 + Expedition)
 	"182": {"sv4"},    // Paradox Rift (182 cards)
 	"091": {"sv4pt5"}, // Paldean Fates (91 cards in main set)
 	"218": {"sv5"},    // Temporal Forces (218 cards)
 	"167": {"sv6"},    // Twilight Masquerade (167 cards)
-	"064": {"sv6pt5"}, // Shrouded Fable (64 cards)
-	"175": {"sv7"},    // Stellar Crown (175 cards)
-	"191": {"sv8"},    // Surging Sparks (191 cards)
+	// "064" handled by "64" entry below (Jungle + Shrouded Fable)
+	"175": {"sv7"}, // Stellar Crown (175 cards)
+	"191": {"sv8"}, // Surging Sparks (191 cards)
 
 	// Sword & Shield Era - unique totals
 	"202": {"swsh1"},     // Sword & Shield base
@@ -171,7 +266,78 @@ var pokemonSetTotalToCode = map[string][]string{
 	// Shared totals (multiple possible sets) - prefer newer set
 	"198": {"sv1", "swsh6"},    // SV1 or Chilling Reign
 	"189": {"swsh10", "swsh3"}, // Astral Radiance or Darkness Ablaze
+
+	// Base Era set totals (combined with other eras that share same totals)
+	"102": {"base1", "hgss4"},   // Base Set (102) or Triumphant (102)
+	"64":  {"base2", "sv6pt5"},  // Jungle (64) or Shrouded Fable (64)
+	"62":  {"base3"},            // Fossil (62 cards)
+	"130": {"base4", "dp1"},     // Base Set 2 (130) or DP Base (130)
+	"82":  {"base5"},            // Team Rocket (82 cards)
+	"83":  {"base5"},            // Team Rocket alternate count (83 with Dark Raichu)
+	"110": {"base6"},            // Legendary Collection (110 cards)
+	"132": {"gym1", "dp3"},      // Gym Heroes (132) or Secret Wonders (132)
+	"111": {"neo1"},             // Neo Genesis (111 cards)
+	"75":  {"neo2"},             // Neo Discovery (75 cards)
+	"66":  {"neo3"},             // Neo Revelation (66 cards)
+	"113": {"neo4"},             // Neo Destiny (113 cards)
+	"165": {"sv3pt5", "ecard1"}, // 151 or Expedition (both have ~165)
+
+	// HeartGold & SoulSilver Era
+	"123": {"hgss1", "dp2"}, // HGSS Base (123) or Mysterious Treasures (123)
+	"95":  {"hgss2"},        // Unleashed (95 cards)
+	"90":  {"hgss3"},        // Undaunted (90 cards)
+
+	// Diamond & Pearl Era
+	"106": {"dp4", "dp7"}, // Great Encounters (106) or Stormfront (106)
+	"100": {"dp5"},        // Majestic Dawn (100 cards)
+	"146": {"dp6"},        // Legends Awakened (146 cards)
 }
+
+// knownPokemonNamesSorted contains Pokemon names sorted by length (longest first)
+// to prevent partial matches (e.g., "mewtwo" is checked before "mew").
+// Sorted once at package initialization for efficiency.
+var knownPokemonNamesSorted = func() []string {
+	names := []string{
+		// Original 151 Pokemon (Base Set era)
+		"bulbasaur", "ivysaur", "venusaur", "charmander", "charmeleon", "charizard",
+		"squirtle", "wartortle", "blastoise", "caterpie", "metapod", "butterfree",
+		"weedle", "kakuna", "beedrill", "pidgey", "pidgeotto", "pidgeot",
+		"rattata", "raticate", "spearow", "fearow", "ekans", "arbok",
+		"pikachu", "raichu", "sandshrew", "sandslash", "nidoran", "nidorina",
+		"nidoqueen", "nidorino", "nidoking", "clefairy", "clefable", "vulpix",
+		"ninetales", "jigglypuff", "wigglytuff", "zubat", "golbat", "oddish",
+		"gloom", "vileplume", "paras", "parasect", "venonat", "venomoth",
+		"diglett", "dugtrio", "meowth", "persian", "psyduck", "golduck",
+		"mankey", "primeape", "growlithe", "arcanine", "poliwag", "poliwhirl",
+		"poliwrath", "abra", "kadabra", "alakazam", "machop", "machoke",
+		"machamp", "bellsprout", "weepinbell", "victreebel", "tentacool", "tentacruel",
+		"geodude", "graveler", "golem", "ponyta", "rapidash", "slowpoke",
+		"slowbro", "magnemite", "magneton", "farfetch'd", "doduo", "dodrio",
+		"seel", "dewgong", "grimer", "muk", "shellder", "cloyster",
+		"gastly", "haunter", "gengar", "onix", "drowzee", "hypno",
+		"krabby", "kingler", "voltorb", "electrode", "exeggcute", "exeggutor",
+		"cubone", "marowak", "hitmonlee", "hitmonchan", "lickitung", "koffing",
+		"weezing", "rhyhorn", "rhydon", "chansey", "tangela", "kangaskhan",
+		"horsea", "seadra", "goldeen", "seaking", "staryu", "starmie",
+		"mr. mime", "scyther", "jynx", "electabuzz", "magmar", "pinsir",
+		"tauros", "magikarp", "gyarados", "lapras", "ditto", "eevee",
+		"vaporeon", "jolteon", "flareon", "porygon", "omanyte", "omastar",
+		"kabuto", "kabutops", "aerodactyl", "snorlax", "articuno", "zapdos",
+		"moltres", "dratini", "dragonair", "dragonite", "mewtwo", "mew",
+		// Gen 2 popular
+		"chikorita", "cyndaquil", "totodile", "umbreon", "espeon", "lugia",
+		"ho-oh", "celebi", "tyranitar", "scizor", "heracross",
+		// Later legendaries and popular Pokemon
+		"rayquaza", "arceus", "giratina", "dialga", "palkia",
+		"jirachi", "deoxys", "darkrai", "shaymin", "lucario", "garchomp",
+		"sylveon", "greninja", "zekrom", "reshiram",
+	}
+	// Sort by length descending (longest first)
+	sort.Slice(names, func(i, j int) bool {
+		return len(names[i]) > len(names[j])
+	})
+	return names
+}()
 
 // ParseOCRText extracts card information from OCR text
 func ParseOCRText(text string, game string) *OCRResult {
@@ -219,24 +385,28 @@ func ParseOCRTextWithAnalysis(text string, game string, imageAnalysis *ImageAnal
 }
 
 // applyImageAnalysis incorporates client-side image analysis into OCR results
+// Uses conservative foil detection: only auto-set IsFoil if confidence >= 0.8
 func applyImageAnalysis(result *OCRResult, analysis *ImageAnalysis) {
 	// Copy condition assessment data
 	result.SuggestedCondition = analysis.SuggestedCondition
 	result.EdgeWhiteningScore = analysis.EdgeWhiteningScore
 	result.CornerScores = analysis.CornerScores
-	result.FoilConfidence = analysis.FoilConfidence
 
-	// Combine foil detection: prefer image analysis if high confidence
-	if analysis.FoilConfidence >= 0.7 {
-		result.IsFoil = analysis.IsFoilDetected
-		if analysis.IsFoilDetected {
-			result.FoilIndicators = append(result.FoilIndicators, "Image analysis detected foil")
-		}
-	} else if analysis.IsFoilDetected && !result.IsFoil {
-		// If text didn't detect foil but image did (lower confidence), still flag it
-		result.IsFoil = true
-		result.FoilIndicators = append(result.FoilIndicators, "Image analysis suggests foil (low confidence)")
+	// Use higher of text-based or image-based foil confidence
+	if analysis.FoilConfidence > result.FoilConfidence {
+		result.FoilConfidence = analysis.FoilConfidence
 	}
+
+	// Conservative foil detection: only auto-set IsFoil if high confidence (>= 0.8)
+	if analysis.FoilConfidence >= 0.8 && analysis.IsFoilDetected {
+		result.IsFoil = true
+		result.FoilIndicators = append(result.FoilIndicators, "Image analysis detected foil (high confidence)")
+	} else if analysis.IsFoilDetected && analysis.FoilConfidence >= 0.5 {
+		// Medium confidence: add indicator but don't auto-set IsFoil
+		result.FoilIndicators = append(result.FoilIndicators, "Image analysis suggests foil (medium confidence)")
+		// Note: NOT setting IsFoil = true for medium confidence
+	}
+	// Low confidence (< 0.5): don't add any indicator or set IsFoil
 }
 
 // normalizeOCRDigits replaces common OCR misreads of digits
@@ -247,6 +417,101 @@ func normalizeOCRDigits(s string) string {
 	result = strings.ReplaceAll(result, "o", "0")
 	// Replace lowercase l with 1 in number patterns
 	result = strings.ReplaceAll(result, "l", "1")
+	return result
+}
+
+// normalizeLineForNameMatch normalizes common OCR errors for name matching
+// Converts digits to their common letter lookalikes: 0->o, 1->i, 5->s
+func normalizeLineForNameMatch(line string) string {
+	result := line
+	// Replace digits with their letter lookalikes for matching
+	result = strings.ReplaceAll(result, "0", "o")
+	result = strings.ReplaceAll(result, "1", "i")
+	result = strings.ReplaceAll(result, "5", "s")
+	// Replace common character confusions
+	result = strings.ReplaceAll(result, "rn", "m")
+	result = strings.ReplaceAll(result, "RN", "M")
+	// Replace spaces in the middle of names
+	result = regexp.MustCompile(`(\w)\s(\w)`).ReplaceAllString(result, "$1$2")
+	return result
+}
+
+// normalizeCardName applies OCR corrections specifically for Pokemon names
+func normalizeCardName(name string) string {
+	// Common OCR errors for specific Pokemon names
+	corrections := map[string]string{
+		// Base Set Pokemon with common OCR errors
+		"Charizarcl":  "Charizard",
+		"Charízard":   "Charizard",
+		"Char1zard":   "Charizard",
+		"Blasto1se":   "Blastoise",
+		"Blastoíse":   "Blastoise",
+		"Venusaur":    "Venusaur",
+		"P1kachu":     "Pikachu",
+		"Píkachu":     "Pikachu",
+		"Ra1chu":      "Raichu",
+		"N1netales":   "Ninetales",
+		"Alakazarn":   "Alakazam",
+		"A1akazam":    "Alakazam",
+		"Mewtw0":      "Mewtwo",
+		"Macharnp":    "Machamp",
+		"Macharno":    "Machamp",
+		"Gyarad0s":    "Gyarados",
+		"Gy arados":   "Gyarados", // Space in the middle
+		"Dragon1te":   "Dragonite",
+		"Art1cuno":    "Articuno",
+		"Za pdos":     "Zapdos",
+		"Snorl ax":    "Snorlax",
+		"Genqar":      "Gengar",
+		"Drat1ni":     "Dratini",
+		"Dragon air":  "Dragonair",
+		"Electabuz z": "Electabuzz",
+		"E1ectabuzz":  "Electabuzz",
+		"Magnern1te":  "Magnemite",
+		"Magneton":    "Magneton",
+		"Jig glypuff": "Jigglypuff",
+		"Wiggly tuff": "Wigglytuff",
+		"Butterfr ee": "Butterfree",
+		"Caterp1e":    "Caterpie",
+		"Po1ywag":     "Poliwag",
+		"Po1iwrath":   "Poliwrath",
+		"Star m1e":    "Starmie",
+		"Hyp no":      "Hypno",
+		"Aero dactyl": "Aerodactyl",
+		"Orn astar":   "Omastar",
+		"Kabu tops":   "Kabutops",
+		// Dark Pokemon (Team Rocket)
+		"Dark Chari zard": "Dark Charizard",
+		"Dark B1astoise":  "Dark Blastoise",
+		"Dark Dragon1te":  "Dark Dragonite",
+		// Gym Leader Pokemon
+		"Lt. Surge's": "Lt. Surge's",
+		"Lt Surge's":  "Lt. Surge's",
+		"Sabr1na's":   "Sabrina's",
+		"Er1ka's":     "Erika's",
+		"G1ovanni's":  "Giovanni's",
+		"Bla1ne's":    "Blaine's",
+		"B1aine's":    "Blaine's",
+	}
+
+	result := name
+	for wrong, correct := range corrections {
+		lowerResult := strings.ToLower(result)
+		lowerWrong := strings.ToLower(wrong)
+		if strings.Contains(lowerResult, lowerWrong) {
+			// Case-insensitive replacement: find the position and replace
+			idx := strings.Index(lowerResult, lowerWrong)
+			result = result[:idx] + correct + result[idx+len(wrong):]
+			break
+		}
+	}
+
+	// Remove common OCR artifacts
+	result = strings.TrimSpace(result)
+
+	// Remove stray characters at the end of names
+	result = regexp.MustCompile(`[^a-zA-Z']+$`).ReplaceAllString(result, "")
+
 	return result
 }
 
@@ -281,6 +546,14 @@ func parsePokemonOCR(result *OCRResult) {
 		result.CardNumber = "GG" + matches[1]
 	}
 
+	// Try SV (Shiny Vault) format: SV49/SV94, SV49/68
+	// This format is used in Hidden Fates, Shining Fates, etc.
+	svRegex := regexp.MustCompile(`SV(\d+)\s*/\s*(?:SV)?(\d+)`)
+	if matches := svRegex.FindStringSubmatch(text); len(matches) >= 3 {
+		result.CardNumber = "SV" + matches[1]
+		// Don't set SetTotal for SV format as it's a subset total, not the main set
+	}
+
 	// Extract HP: "HP 170" or "170 HP" or just "D170" pattern
 	// Also handle OCR variations like "w 130" (H looks like w), "4P 60" (HP with noise)
 	hpPatterns := []*regexp.Regexp{
@@ -303,15 +576,31 @@ func parsePokemonOCR(result *OCRResult) {
 	}
 
 	// Extract set code patterns with full set code (e.g., SWSH4, SV1, XY12)
-	// More comprehensive list of Pokemon TCG set prefixes
-	setCodeRegex := regexp.MustCompile(`\b(SWSH\d{1,2}|SV\d{1,2}|XY\d{1,2}|SM\d{1,2}|BW\d{1,2}|DP\d?|EX\d{1,2}|RS|LC|BS\d?|PGO|CEL25|PR-SW|PR-SV)\b`)
+	// Only match codes that have numbers to avoid false positives with PTCGO codes
+	// Skip SV pattern if we already have an SV card number (Shiny Vault cards use SV## format)
+	var setCodeRegex *regexp.Regexp
+	if strings.HasPrefix(result.CardNumber, "SV") {
+		// Card has Shiny Vault number - don't match SV as set code
+		setCodeRegex = regexp.MustCompile(`\b(SWSH\d{1,2}|XY\d{1,2}|SM\d{1,2}(?:PT5)?|BW\d{1,2}|DP\d{1,2}|EX\d{1,2}|PGO|CEL25|PR-SW|PR-SV)\b`)
+	} else {
+		setCodeRegex = regexp.MustCompile(`\b(SWSH\d{1,2}|SV\d{1,2}(?:PT5)?|XY\d{1,2}|SM\d{1,2}(?:PT5)?|BW\d{1,2}|DP\d{1,2}|EX\d{1,2}|PGO|CEL25|PR-SW|PR-SV)\b`)
+	}
 	if matches := setCodeRegex.FindStringSubmatch(upperText); len(matches) >= 1 {
 		result.SetCode = strings.ToLower(matches[0])
 	}
 
+	// Detect WotC era (Wizards of the Coast - Base Set through Expedition)
+	// Run this early so set detection can use the hint
+	detectWotCEra(result, upperText)
+
 	// Try to detect set from set name if no set code found
 	if result.SetCode == "" {
 		detectSetFromName(result, upperText)
+	}
+
+	// Try to detect set from PTCGO code (2-letter codes like BS, JU, FO)
+	if result.SetCode == "" {
+		detectSetFromPTCGO(result, upperText)
 	}
 
 	// Try to detect set from card number total if still no set code
@@ -319,8 +608,11 @@ func parsePokemonOCR(result *OCRResult) {
 		detectSetFromTotal(result)
 	}
 
-	// Detect foil/holo indicators
+	// Detect foil/holo indicators (conservative detection)
 	detectFoilIndicators(result, upperText)
+
+	// Detect first edition (Pokemon Base Set era)
+	detectFirstEdition(result, upperText)
 
 	// Detect rarity (before card name extraction so we can skip rarity lines)
 	detectPokemonRarity(result, upperText)
@@ -333,37 +625,70 @@ func parsePokemonOCR(result *OCRResult) {
 }
 
 // detectFoilIndicators checks for foil/holographic card indicators
+// Uses conservative detection: only explicit foil text triggers IsFoil=true
+// Card types (V, VMAX, etc.) do NOT trigger foil as they come in both foil and non-foil
 func detectFoilIndicators(result *OCRResult, upperText string) {
-	foilPatterns := map[string]string{
-		"HOLO":          "Holographic text detected",
-		"HOLOFOIL":      "Holofoil text detected",
-		"REVERSE HOLO":  "Reverse holo text detected",
-		"REVERSE":       "Reverse holo indicator",
-		"SHINY":         "Shiny variant text",
-		"GOLD":          "Gold card indicator",
-		"RAINBOW":       "Rainbow rare indicator",
-		"FULL ART":      "Full art card",
-		"ALT ART":       "Alternate art card",
-		"ALTERNATE ART": "Alternate art card",
-		"SECRET":        "Secret rare indicator",
-		"ILLUSTRATION":  "Special illustration rare",
-		"SPECIAL ART":   "Special art rare",
-		"CROWN ZENITH":  "Crown Zenith (often special)",
+	// High confidence patterns (0.9) - these ARE foil, auto-set IsFoil
+	highConfidencePatterns := map[string]string{
+		"HOLOFOIL":     "Holofoil text detected",
+		"REVERSE HOLO": "Reverse holo text detected",
+		"HOLO RARE":    "Holo rare text detected",
 	}
 
-	for pattern, hint := range foilPatterns {
+	// Check HOLO separately to avoid matching other HOLO patterns twice
+	if strings.Contains(upperText, "HOLO") &&
+		!strings.Contains(upperText, "HOLOFOIL") &&
+		!strings.Contains(upperText, "HOLO RARE") &&
+		!strings.Contains(upperText, "REVERSE HOLO") {
+		result.IsFoil = true
+		result.FoilConfidence = 0.9
+		result.FoilIndicators = append(result.FoilIndicators, "Holographic text detected")
+	}
+
+	for pattern, hint := range highConfidencePatterns {
 		if strings.Contains(upperText, pattern) {
 			result.IsFoil = true
+			result.FoilConfidence = 0.9
 			result.FoilIndicators = append(result.FoilIndicators, hint)
 		}
 	}
 
-	// Check for V, VMAX, VSTAR, EX, GX patterns which are typically holo
-	specialPatterns := regexp.MustCompile(`\b(VMAX|VSTAR|V|GX|EX|MEGA|PRIME|LV\.?\s*X)\b`)
-	if specialPatterns.MatchString(upperText) {
+	// Also check for standalone "FOIL" text
+	foilRegex := regexp.MustCompile(`\bFOIL\b`)
+	if foilRegex.MatchString(upperText) {
 		result.IsFoil = true
-		result.FoilIndicators = append(result.FoilIndicators, "Special card type (typically holographic)")
+		result.FoilConfidence = 0.9
+		result.FoilIndicators = append(result.FoilIndicators, "Foil text detected")
 	}
+
+	// Medium confidence patterns (0.6) - often foil but NOT auto-set
+	// These add to FoilConfidence but don't set IsFoil automatically
+	mediumConfidencePatterns := map[string]string{
+		"RAINBOW":       "Rainbow rare indicator",
+		"GOLD":          "Gold card indicator",
+		"SECRET":        "Secret rare indicator",
+		"FULL ART":      "Full art card",
+		"SPECIAL ART":   "Special art rare",
+		"ILLUSTRATION":  "Special illustration rare",
+		"ALT ART":       "Alternate art card",
+		"ALTERNATE ART": "Alternate art card",
+		"SHINY":         "Shiny variant text",
+	}
+
+	for pattern, hint := range mediumConfidencePatterns {
+		if strings.Contains(upperText, pattern) {
+			// Only update confidence if not already high
+			if result.FoilConfidence < 0.6 {
+				result.FoilConfidence = 0.6
+			}
+			result.FoilIndicators = append(result.FoilIndicators, hint)
+			// Note: NOT setting IsFoil = true for medium confidence
+		}
+	}
+
+	// NOTE: Card types (V, VMAX, VSTAR, GX, EX, MEGA, PRIME) are intentionally
+	// NOT checked for foil detection. These card types come in both foil and
+	// non-foil variants, so they should not trigger automatic foil detection.
 }
 
 // detectPokemonRarity detects card rarity from text
@@ -424,32 +749,91 @@ func extractPokemonCardName(lines []string, detectedRarity string) string {
 		"illustration", "special art", "ultra", "hyper", "double",
 	}
 
-	// Known Pokemon names that might appear with OCR noise
-	knownPokemonNames := []string{
-		"pikachu", "charizard", "mewtwo", "mew", "blastoise", "venusaur",
-		"umbreon", "espeon", "eevee", "gengar", "dragonite", "gyarados",
-		"rayquaza", "arceus", "giratina", "dialga", "palkia", "lugia",
-		"ho-oh", "celebi", "jirachi", "deoxys", "darkrai", "shaymin",
-		"snorlax", "machamp", "alakazam", "golem", "arcanine", "lapras",
+	// Gym Leader and Team Rocket prefixes for WotC era cards
+	gymLeaderPrefixes := []string{
+		"lt. surge's", "lt surge's", "sabrina's", "brock's", "misty's",
+		"erika's", "koga's", "blaine's", "giovanni's",
+		"dark", "light", "rocket's", "team rocket's",
 	}
 
-	// First pass: look for known Pokemon names in the text
-	fullText := strings.ToLower(strings.Join(lines, " "))
-	for _, pokeName := range knownPokemonNames {
-		if strings.Contains(fullText, pokeName) {
-			// Find the line containing this Pokemon name and extract it cleanly
-			for _, line := range lines {
-				if strings.Contains(strings.ToLower(line), pokeName) {
-					// Clean up the line to extract just the name part
-					name := cleanPokemonName(line, pokeName)
-					if name != "" {
-						return name
+	// Use pre-sorted Pokemon names (sorted by length, longest first at package init)
+	// This prevents partial matches (e.g., "mewtwo" is checked before "mew")
+
+	// First pass: look for known Pokemon names in the text, prioritizing earlier lines
+	// (the card name is typically the first line, while "Evolves from X" comes later)
+	for _, line := range lines {
+		// Normalize the line for OCR errors (0->o, 1->i, etc.) for name matching
+		normalizedLine := normalizeLineForNameMatch(line)
+		lower := strings.ToLower(normalizedLine)
+
+		// Skip lines that describe evolution (these contain pre-evolution names)
+		if strings.Contains(lower, "evolves from") {
+			continue
+		}
+
+		// Skip lines that are clearly not the card name
+		shouldSkip := false
+		for _, pattern := range skipPatterns {
+			if strings.Contains(lower, pattern) {
+				shouldSkip = true
+				break
+			}
+		}
+		if shouldSkip {
+			continue
+		}
+
+		// Check if this line contains a known Pokemon name (sorted by length, longest first)
+		for _, pokeName := range knownPokemonNamesSorted {
+			if strings.Contains(lower, pokeName) {
+				// Check for gym leader or team rocket prefixes
+				for _, prefix := range gymLeaderPrefixes {
+					if strings.Contains(lower, prefix+" "+pokeName) || strings.Contains(lower, prefix+pokeName) {
+						// Found a prefixed name like "Dark Charizard" or "Lt. Surge's Electabuzz"
+						name := cleanPokemonName(line, prefix+" "+pokeName)
+						if name != "" {
+							return name
+						}
 					}
+				}
+				// Clean up the line to extract just the name part
+				name := cleanPokemonName(line, pokeName)
+				if name != "" {
+					return name
 				}
 			}
 		}
 	}
 
+	// Fallback 1: Search all text for any known Pokemon name
+	// This helps when OCR doesn't capture the card name line but mentions the Pokemon elsewhere
+	allText := strings.Join(lines, " ")
+	// Use two versions of the text:
+	// - lowerAllText: preserves spaces for "evolves from" pattern matching
+	// - normalizedAllText: aggressive normalization for finding names with OCR errors
+	lowerAllText := strings.ToLower(allText)
+	normalizedAllText := strings.ToLower(normalizeLineForNameMatch(allText))
+	for _, pokeName := range knownPokemonNamesSorted {
+		if strings.Contains(normalizedAllText, pokeName) {
+			// Skip if this name only appears in "evolves from" context
+			// e.g., "Evolves from Charmeleon" should not match for a Charizard card
+			// Use lowerAllText (not normalized) for this check to preserve spaces
+			evolvesPattern := regexp.MustCompile(`evolves\s+from\s+` + regexp.QuoteMeta(pokeName))
+			if evolvesPattern.MatchString(lowerAllText) {
+				// Check if the name appears elsewhere (not just in evolves from)
+				// Remove the "evolves from X" text and check if name still exists
+				cleanedText := evolvesPattern.ReplaceAllString(lowerAllText, "")
+				if !strings.Contains(cleanedText, pokeName) {
+					continue // Name only appears in evolves from context, skip it
+				}
+			}
+			// Found a Pokemon name - capitalize it properly
+			result := strings.ToUpper(string(pokeName[0])) + pokeName[1:]
+			return result
+		}
+	}
+
+	// Fallback 2: Try to find a reasonable first line that could be a name
 	for _, line := range lines {
 		lower := strings.ToLower(line)
 
@@ -503,7 +887,7 @@ func extractPokemonCardName(lines []string, detectedRarity string) string {
 		}
 	}
 
-	// Fallback: return first line with letters
+	// Fallback 3: return first line with letters
 	for _, line := range lines {
 		if regexp.MustCompile(`[a-zA-Z]{3,}`).MatchString(line) {
 			return cleanPokemonName(line, "")
@@ -531,9 +915,11 @@ func cleanPokemonName(line, knownName string) string {
 			result := match[1]
 			if len(match) >= 3 && match[2] != "" {
 				suffix := match[2]
-				// Preserve lowercase for "ex" (modern ex cards), uppercase for others
+				// Preserve original case for EX/ex (EX era vs modern ex cards)
+				// Modern Scarlet & Violet uses lowercase "ex", older EX era uses uppercase "EX"
 				if strings.ToLower(suffix) == "ex" {
-					result += " ex"
+					// Keep the original case from the OCR text
+					result += " " + suffix
 				} else {
 					result += " " + strings.ToUpper(suffix)
 				}
@@ -550,6 +936,9 @@ func cleanPokemonName(line, knownName string) string {
 	name = regexp.MustCompile(`[^a-zA-Z0-9\s'-]`).ReplaceAllString(name, "")
 	name = regexp.MustCompile(`\s+`).ReplaceAllString(name, " ")
 	name = strings.TrimSpace(name)
+
+	// Apply OCR corrections for common Pokemon name misspellings
+	name = normalizeCardName(name)
 
 	return name
 }
@@ -744,6 +1133,102 @@ func detectConditionHints(result *OCRResult, upperText string) {
 	}
 }
 
+// detectWotCEra checks for indicators that this is a Wizards of the Coast era card
+// WotC era cards (1999-2003) have distinctive copyright text and formatting
+func detectWotCEra(result *OCRResult, upperText string) {
+	// Look for Wizards of the Coast copyright patterns
+	// Base Set through Expedition era cards have "Wizards" copyright
+	wotcPatterns := []string{
+		"WIZARDS OF THE COAST",
+		"WIZARDS",
+		"WOTC",
+		"©1995",
+		"©1996",
+		"©1997",
+		"©1998",
+		"©1999",
+		"©2000",
+		"©2001",
+		"©2002",
+		"©2003",
+		// OCR variations of copyright
+		"C1995",
+		"C1996",
+		"C1999",
+		"01995",
+		"01999",
+		// Common OCR errors for Wizards
+		"WIZAROS",
+		"W1ZARDS",
+		"WlZARDS",
+	}
+
+	for _, pattern := range wotcPatterns {
+		if strings.Contains(upperText, pattern) {
+			result.IsWotCEra = true
+			return
+		}
+	}
+
+	// Also check for WotC era based on low set totals without modern set codes
+	// Base era sets have specific totals: 102, 64, 62, 82, 83, 110, 132, 111, 75, 66, 113
+	// If we see these totals AND no modern set code, it's likely WotC era
+	wotcSetTotals := map[string]bool{
+		"102": true, // Base Set
+		"64":  true, // Jungle
+		"62":  true, // Fossil
+		"82":  true, // Team Rocket
+		"83":  true, // Team Rocket (with Dark Raichu)
+		"110": true, // Legendary Collection
+		"132": true, // Gym Heroes/Challenge
+		"111": true, // Neo Genesis
+		"75":  true, // Neo Discovery
+		"66":  true, // Neo Revelation
+		"113": true, // Neo Destiny
+		"130": true, // Base Set 2
+	}
+
+	if result.SetTotal != "" && result.SetCode == "" && wotcSetTotals[result.SetTotal] {
+		// Check if there's no modern indicator
+		hasModernIndicator := strings.Contains(upperText, "SWSH") ||
+			strings.Contains(upperText, "SV") ||
+			strings.Contains(upperText, "SM") ||
+			strings.Contains(upperText, "XY") ||
+			strings.Contains(upperText, "BW") ||
+			strings.Contains(upperText, "HGSS") ||
+			strings.Contains(upperText, "DP")
+
+		if !hasModernIndicator {
+			result.IsWotCEra = true
+		}
+	}
+}
+
+// detectFirstEdition checks for first edition indicators (Pokemon cards only)
+// First edition cards from Base Set era have a "1ST EDITION" stamp
+func detectFirstEdition(result *OCRResult, upperText string) {
+	// Check patterns from most specific to least specific to avoid duplicate matches
+	// "1ST EDITION" contains "1ST ED", so check longer patterns first
+	if strings.Contains(upperText, "1ST EDITION") {
+		result.IsFirstEdition = true
+		result.FirstEdIndicators = append(result.FirstEdIndicators, "1ST EDITION detected")
+	} else if strings.Contains(upperText, "FIRST EDITION") {
+		result.IsFirstEdition = true
+		result.FirstEdIndicators = append(result.FirstEdIndicators, "FIRST EDITION detected")
+	} else if strings.Contains(upperText, "1ST ED") {
+		// Only match "1ST ED" if we didn't already match "1ST EDITION"
+		result.IsFirstEdition = true
+		result.FirstEdIndicators = append(result.FirstEdIndicators, "1ST ED detected")
+	}
+
+	// Check for "SHADOWLESS" - these are related to first edition era
+	// but not exactly first edition (they're after 1st ed but before unlimited)
+	// Add as indicator but don't auto-set first edition
+	if strings.Contains(upperText, "SHADOWLESS") {
+		result.FirstEdIndicators = append(result.FirstEdIndicators, "Shadowless variant (verify if 1st edition)")
+	}
+}
+
 func calculateConfidence(result *OCRResult) float64 {
 	score := 0.0
 
@@ -773,8 +1258,22 @@ func detectSetFromName(result *OCRResult, upperText string) {
 	}
 	matches := []setMatch{}
 
+	// Short set names that need word boundary checking to avoid false matches
+	// e.g., "BASE" should not match "BASE DAMAGE" from attack text
+	shortNames := map[string]bool{
+		"BASE": true, "FOSSIL": true, "JUNGLE": true,
+	}
+
 	for name, code := range pokemonSetNameToCode {
 		if strings.Contains(upperText, name) {
+			// For short names, require word boundaries (space/punctuation/start/end)
+			if shortNames[name] {
+				// Use regex to check for word boundary
+				pattern := regexp.MustCompile(`(?:^|[\s,.:;!?])` + regexp.QuoteMeta(name) + `(?:[\s,.:;!?]|$)`)
+				if !pattern.MatchString(upperText) {
+					continue // Skip false match
+				}
+			}
 			matches = append(matches, setMatch{name: name, code: code})
 		}
 	}
@@ -806,18 +1305,76 @@ func detectSetFromTotal(result *OCRResult) {
 
 	// Also try with the original (padded) version
 	if possibleSets, ok := pokemonSetTotalToCode[result.SetTotal]; ok {
-		// If there's only one possible set, use it
-		if len(possibleSets) == 1 {
-			result.SetCode = possibleSets[0]
-		}
-		// Otherwise we can't be certain, but could hint at possibilities
+		result.SetCode = selectBestSetFromTotal(possibleSets, result.IsWotCEra)
 		return
 	}
 
 	// Try with normalized total (without leading zeros)
 	if possibleSets, ok := pokemonSetTotalToCode[normalizedTotal]; ok {
-		if len(possibleSets) == 1 {
-			result.SetCode = possibleSets[0]
+		result.SetCode = selectBestSetFromTotal(possibleSets, result.IsWotCEra)
+	}
+}
+
+// selectBestSetFromTotal picks the most likely set when multiple sets share the same total
+// Uses a priority system that considers set era and popularity
+// If isWotCEra is true, prioritizes classic WotC sets (Base through Neo)
+func selectBestSetFromTotal(possibleSets []string, isWotCEra bool) string {
+	if len(possibleSets) == 1 {
+		return possibleSets[0]
+	}
+
+	// WotC era sets (Base through Neo/e-Card)
+	baseEraSets := map[string]bool{
+		"base1": true, "base2": true, "base3": true, "base4": true, "base5": true, "base6": true,
+		"gym1": true, "gym2": true,
+		"neo1": true, "neo2": true, "neo3": true, "neo4": true,
+		"ecard1": true, "ecard2": true, "ecard3": true,
+	}
+
+	// If we detected WotC era, prioritize base era sets
+	if isWotCEra {
+		for _, set := range possibleSets {
+			if baseEraSets[set] {
+				return set
+			}
+		}
+	}
+
+	// Default priority order for ambiguous totals:
+	// 1. Newer era sets (sv*, swsh*) - more popular and commonly scanned
+	// 2. Base era sets (base1-6, gym1-2, neo1-4) - classic sets still commonly scanned
+	// 3. Middle era sets (hgss*, dp*, ex*, bw*, sm*, xy*)
+
+	// First check for modern sets (Scarlet & Violet, Sword & Shield)
+	for _, set := range possibleSets {
+		if strings.HasPrefix(set, "sv") || strings.HasPrefix(set, "swsh") {
+			return set
+		}
+	}
+
+	// Then check for classic WotC era sets (Base through Neo)
+	for _, set := range possibleSets {
+		if baseEraSets[set] {
+			return set
+		}
+	}
+
+	// Otherwise return the first option
+	return possibleSets[0]
+}
+
+// detectSetFromPTCGO tries to detect set code from PTCGO 2-letter codes
+// These codes appear on physical cards and are used for Pokemon TCG Online/Live
+func detectSetFromPTCGO(result *OCRResult, upperText string) {
+	// Look for PTCGO codes: 2 letters (BS, JU, FO, TR, LC) or letter+number (G1, G2, N1-N4, B2)
+	// Use word boundaries to avoid matching within words
+	ptcgoRegex := regexp.MustCompile(`\b([A-Z][A-Z0-9])\b`)
+
+	for _, match := range ptcgoRegex.FindAllStringSubmatch(upperText, -1) {
+		code := match[1]
+		if setCode, ok := pokemonPTCGOToCode[code]; ok {
+			result.SetCode = setCode
+			return
 		}
 	}
 }

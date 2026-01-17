@@ -47,12 +47,13 @@ class ScanFixtures {
     'confidence': 0.7,
   };
 
-  /// Foil scan metadata
+  /// Foil scan metadata (high confidence, should trigger "Detected")
   static const Map<String, dynamic> foilMetadataJson = {
     'card_name': 'Shiny Card',
     'is_foil': true,
     'foil_indicators': ['HOLO', 'REVERSE'],
     'confidence': 0.8,
+    'foil_confidence': 0.9, // High confidence triggers "Detected" label and auto-fills foil
   };
 
   /// Complete scan result JSON
