@@ -29,6 +29,16 @@ const handleAdd = async ({ cardId, quantity, condition, foil }) => {
     message.value = 'Failed to add card: ' + err.message
   }
 }
+
+const handlePriceUpdated = (updatedCard) => {
+  // Update the card in the selected card and search results
+  if (selectedCard.value) {
+    selectedCard.value.price_usd = updatedCard.price_usd
+    selectedCard.value.price_foil_usd = updatedCard.price_foil_usd
+    selectedCard.value.price_updated_at = updatedCard.price_updated_at
+    selectedCard.value.price_source = updatedCard.price_source
+  }
+}
 </script>
 
 <template>
@@ -84,6 +94,7 @@ const handleAdd = async ({ cardId, quantity, condition, foil }) => {
       :is-collection-item="false"
       @close="selectedCard = null"
       @add="handleAdd"
+      @priceUpdated="handlePriceUpdated"
     />
   </div>
 </template>

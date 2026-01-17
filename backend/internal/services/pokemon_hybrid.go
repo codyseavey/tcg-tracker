@@ -244,7 +244,7 @@ func (s *PokemonHybridService) enrichWithPrices(cards []models.Card, query strin
 		priceMap[key] = priceCard
 	}
 
-	// Match prices to cards that need them
+	// Match prices to cards that need them and save to database
 	for i := range cards {
 		if cards[i].PriceSource == "cached" {
 			continue // Already has cached price
@@ -257,6 +257,13 @@ func (s *PokemonHybridService) enrichWithPrices(cards []models.Card, query strin
 			cards[i].PriceFoilUSD = priceCard.PriceFoilUSD
 			cards[i].PriceUpdatedAt = &now
 			cards[i].PriceSource = "api"
+
+			// Save to database for caching
+			db.Save(&cards[i])
+		} else {
+			// No price found, still save the card for future reference
+			cards[i].PriceSource = "pending"
+			db.Save(&cards[i])
 		}
 	}
 }
@@ -287,8 +294,9 @@ func (s *PokemonHybridService) GetCard(id string) (*models.Card, error) {
 			}
 
 			// No cached price or it's stale, mark as pending
-			// The background worker will update it
+			// Save to database so background worker can find and update it
 			card.PriceSource = "pending"
+			db.Save(&card)
 			return &card, nil
 		}
 	}
@@ -302,18 +310,17 @@ func (s *PokemonHybridService) convertToCard(lc LocalPokemonCard) models.Card {
 		setName = set.Name
 	}
 
-	now := time.Now()
 	return models.Card{
-		ID:             lc.ID,
-		Game:           models.GamePokemon,
-		Name:           lc.Name,
-		SetName:        setName,
-		SetCode:        lc.SetID,
-		CardNumber:     lc.Number,
-		Rarity:         lc.Rarity,
-		ImageURL:       lc.Images.Small,
-		ImageURLLarge:  lc.Images.Large,
-		PriceUpdatedAt: &now,
+		ID:            lc.ID,
+		Game:          models.GamePokemon,
+		Name:          lc.Name,
+		SetName:       setName,
+		SetCode:       lc.SetID,
+		CardNumber:    lc.Number,
+		Rarity:        lc.Rarity,
+		ImageURL:      lc.Images.Small,
+		ImageURLLarge: lc.Images.Large,
+		PriceSource:   "pending",
 	}
 }
 

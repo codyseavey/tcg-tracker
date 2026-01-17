@@ -52,6 +52,18 @@ const handleRefreshPrices = async () => {
   await store.refreshPrices()
 }
 
+const handlePriceUpdated = (updatedCard) => {
+  // Update the card in the selected item
+  if (selectedItem.value && selectedItem.value.card) {
+    selectedItem.value.card.price_usd = updatedCard.price_usd
+    selectedItem.value.card.price_foil_usd = updatedCard.price_foil_usd
+    selectedItem.value.card.price_updated_at = updatedCard.price_updated_at
+    selectedItem.value.card.price_source = updatedCard.price_source
+  }
+  // Also refresh the collection to get updated data
+  store.fetchCollection()
+}
+
 onMounted(() => {
   store.fetchCollection()
   store.fetchStats()
@@ -119,6 +131,7 @@ onMounted(() => {
       @close="selectedItem = null"
       @update="handleUpdate"
       @remove="handleRemove"
+      @priceUpdated="handlePriceUpdated"
     />
   </div>
 </template>

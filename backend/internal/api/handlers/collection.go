@@ -265,6 +265,7 @@ func (h *CollectionHandler) RefreshPrices(c *gin.Context) {
 		card.PriceUSD = updatedCard.PriceUSD
 		card.PriceFoilUSD = updatedCard.PriceFoilUSD
 		card.PriceUpdatedAt = updatedCard.PriceUpdatedAt
+		card.PriceSource = "api"
 
 		if err := db.Save(&card).Error; err == nil {
 			updated++
