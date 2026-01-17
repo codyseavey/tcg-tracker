@@ -26,13 +26,13 @@ func NewTCGdexService() *TCGdexService {
 }
 
 type tcgdexCard struct {
-	ID       string        `json:"id"`
-	LocalID  string        `json:"localId"`
-	Name     string        `json:"name"`
-	Rarity   string        `json:"rarity"`
-	Image    string        `json:"image"`
-	Set      tcgdexSet     `json:"set"`
-	Pricing  *tcgdexPrices `json:"pricing"`
+	ID      string        `json:"id"`
+	LocalID string        `json:"localId"`
+	Name    string        `json:"name"`
+	Rarity  string        `json:"rarity"`
+	Image   string        `json:"image"`
+	Set     tcgdexSet     `json:"set"`
+	Pricing *tcgdexPrices `json:"pricing"`
 }
 
 type tcgdexSet struct {
