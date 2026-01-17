@@ -229,14 +229,67 @@ func (s *PokemonHybridService) SearchCards(query string) (*models.CardSearchResu
 		cards = append(cards, card)
 	}
 
-	// Enrich with prices from PriceTracker (batch or individual)
-	s.enrichWithPrices(cards, query)
+	// Load cached prices only (fast) - don't block on API calls
+	s.loadCachedPrices(cards)
+
+	// Enrich remaining cards with prices in background (non-blocking)
+	go s.enrichWithPricesAsync(cards)
 
 	return &models.CardSearchResult{
 		Cards:      cards,
 		TotalCount: len(scored),
 		HasMore:    len(scored) > maxResults,
 	}, nil
+}
+
+// loadCachedPrices loads prices from database cache only (fast, no API calls)
+func (s *PokemonHybridService) loadCachedPrices(cards []models.Card) {
+	db := database.GetDB()
+	cacheThreshold := 24 * time.Hour
+
+	for i := range cards {
+		var cachedCard models.Card
+		if err := db.First(&cachedCard, "id = ?", cards[i].ID).Error; err == nil {
+			if cachedCard.PriceUpdatedAt != nil && time.Since(*cachedCard.PriceUpdatedAt) < cacheThreshold {
+				cards[i].PriceUSD = cachedCard.PriceUSD
+				cards[i].PriceFoilUSD = cachedCard.PriceFoilUSD
+				cards[i].PriceUpdatedAt = cachedCard.PriceUpdatedAt
+				cards[i].PriceSource = "cached"
+			} else {
+				cards[i].PriceSource = "stale"
+			}
+		} else {
+			cards[i].PriceSource = "pending"
+		}
+	}
+}
+
+// enrichWithPricesAsync fetches prices from API in background and updates database
+func (s *PokemonHybridService) enrichWithPricesAsync(cards []models.Card) {
+	db := database.GetDB()
+
+	for _, card := range cards {
+		if card.PriceSource == "cached" {
+			continue // Already have fresh price
+		}
+
+		// Fetch price from TCGdex
+		priceCard, err := s.tcgdexService.GetCard(card.ID)
+		if err != nil {
+			log.Printf("Failed to fetch price for %s: %v", card.ID, err)
+			continue
+		}
+
+		if priceCard != nil && (priceCard.PriceUSD > 0 || priceCard.PriceFoilUSD > 0) {
+			now := time.Now()
+			card.PriceUSD = priceCard.PriceUSD
+			card.PriceFoilUSD = priceCard.PriceFoilUSD
+			card.PriceUpdatedAt = &now
+			card.LastPriceCheck = &now
+			card.PriceSource = "tcgdex"
+			db.Save(&card)
+		}
+	}
 }
 
 func (s *PokemonHybridService) enrichWithPrices(cards []models.Card, _ string) {
