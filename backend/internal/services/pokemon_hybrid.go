@@ -292,48 +292,6 @@ func (s *PokemonHybridService) enrichWithPricesAsync(cards []models.Card) {
 	}
 }
 
-func (s *PokemonHybridService) enrichWithPrices(cards []models.Card, _ string) {
-	db := database.GetDB()
-	cacheThreshold := 24 * time.Hour // Prices older than this are considered stale
-
-	for i := range cards {
-		var cachedCard models.Card
-		if err := db.First(&cachedCard, "id = ?", cards[i].ID).Error; err == nil {
-			// Card exists in cache
-			if cachedCard.PriceUpdatedAt != nil && time.Since(*cachedCard.PriceUpdatedAt) < cacheThreshold {
-				// Use cached price (fresh enough)
-				cards[i].PriceUSD = cachedCard.PriceUSD
-				cards[i].PriceFoilUSD = cachedCard.PriceFoilUSD
-				cards[i].PriceUpdatedAt = cachedCard.PriceUpdatedAt
-				cards[i].PriceSource = "cached"
-				continue
-			}
-		}
-
-		// Fetch price from TCGdex (no rate limits)
-		priceCard, err := s.tcgdexService.GetCard(cards[i].ID)
-		if err != nil {
-			log.Printf("Failed to fetch price for %s: %v", cards[i].ID, err)
-			cards[i].PriceSource = "error"
-			continue
-		}
-
-		if priceCard != nil && (priceCard.PriceUSD > 0 || priceCard.PriceFoilUSD > 0) {
-			now := time.Now()
-			cards[i].PriceUSD = priceCard.PriceUSD
-			cards[i].PriceFoilUSD = priceCard.PriceFoilUSD
-			cards[i].PriceUpdatedAt = &now
-			cards[i].PriceSource = "tcgdex"
-
-			// Cache the price in database
-			cards[i].LastPriceCheck = &now
-			db.Save(&cards[i])
-		} else {
-			cards[i].PriceSource = "not_found"
-		}
-	}
-}
-
 func (s *PokemonHybridService) GetCard(id string) (*models.Card, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
