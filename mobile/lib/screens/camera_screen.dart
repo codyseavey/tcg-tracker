@@ -8,6 +8,10 @@ import '../services/camera_service.dart';
 import '../services/ocr_service.dart';
 import 'scan_result_screen.dart';
 
+/// Camera screen for scanning trading cards.
+///
+/// Uses server-side OCR when available for better accuracy, falling back
+/// to client-side ML Kit OCR when the server is unavailable.
 class CameraScreen extends StatefulWidget {
   final CameraService? cameraService;
   final OcrService? ocrService;
