@@ -1,0 +1,65 @@
+# MTG OCR Text Samples
+# Each sample is separated by ===
+# Format: EXPECTED_NAME | EXPECTED_SET_CODE | EXPECTED_NUMBER
+
+===
+Lightning Bolt
+Instant
+Deal 3 damage to any target.
+073/303
+MH2
+EXPECTED: Lightning Bolt | MH2 | 073
+
+===
+Sheoldred, the Apocalypse
+Legendary Creature - Phyrexian Praetor
+4/5
+107/281
+DMU
+EXPECTED: Sheoldred, the Apocalypse | DMU | 107
+
+===
+The One Ring
+Legendary Artifact
+Showcase
+246/281
+LTR
+EXPECTED: The One Ring | LTR | 246
+
+===
+Sol Ring
+Artifact
+CMD
+456/789
+EXPECTED: Sol Ring | CMD | 456
+
+===
+Ragavan, Nimble Pilferer
+Foil
+Creature - Monkey Pirate
+138/303
+MH2
+EXPECTED: Ragavan, Nimble Pilferer | MH2 | 138
+
+===
+Atraxa, Praetors' Voice
+Legendary Creature - Phyrexian Angel Horror
+Etched
+190/332
+2XM
+EXPECTED: Atraxa, Praetors' Voice | 2XM | 190
+
+===
+Force of Negation
+Extended Art
+Instant
+399/303
+MH2
+EXPECTED: Force of Negation | MH2 | 399
+
+===
+Liliana of the Veil
+Legendary Planeswalker - Liliana
+097/281
+DMU
+EXPECTED: Liliana of the Veil | DMU | 097

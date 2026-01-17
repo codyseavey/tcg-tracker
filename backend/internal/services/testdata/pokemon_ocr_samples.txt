@@ -1,0 +1,93 @@
+# Pokemon OCR Text Samples
+# Each sample is separated by ===
+# Format: EXPECTED_NAME | EXPECTED_SET_CODE | EXPECTED_NUMBER | EXPECTED_HP
+
+===
+Charizard VMAX
+HP 330
+Fire
+Darkness Ablaze
+020/189
+SWSH3
+EXPECTED: Charizard VMAX | swsh3 | 20 | 330
+
+===
+Pikachu V
+HP 190
+Lightning
+Vivid Voltage
+043/185
+SWSH4
+EXPECTED: Pikachu V | swsh4 | 43 | 190
+
+===
+Umbreon VMAX
+HP 310
+Darkness
+Evolving Skies
+215/203
+SWSH7
+EXPECTED: Umbreon VMAX | swsh7 | 215 | 310
+
+===
+Mewtwo ex
+HP 330
+Psychic
+151
+150/165
+SV3PT5
+EXPECTED: Mewtwo ex | sv3pt5 | 150 | 330
+
+===
+Charizard ex
+HP 330
+Fire
+Paldean Fates
+054/091
+SV4PT5
+EXPECTED: Charizard ex | sv4pt5 | 54 | 330
+
+===
+Mew VMAX
+HP 310
+Psychic
+Full Art
+Fusion Strike
+269/264
+SWSH8
+EXPECTED: Mew VMAX | swsh8 | 269 | 310
+
+===
+Arceus VSTAR
+HP 280
+Colorless
+Brilliant Stars
+123/172
+SWSH9
+EXPECTED: Arceus VSTAR | swsh9 | 123 | 280
+
+===
+Giratina V
+HP 220
+Dragon
+Special Art Rare
+Lost Origin
+186/196
+SWSH11
+EXPECTED: Giratina V | swsh11 | 186 | 220
+
+===
+Pikachu
+HP 60
+Lightning
+Basic Pokemon
+025/185
+EXPECTED: Pikachu | swsh4 | 25 | 60
+
+===
+Umbreon
+HP 110
+Darkness
+TG17/TG30
+Brilliant Stars
+EXPECTED: Umbreon |  | TG17 | 110

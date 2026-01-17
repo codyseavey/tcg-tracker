@@ -229,13 +229,28 @@ func applyImageAnalysis(result *OCRResult, analysis *ImageAnalysis) {
 	}
 }
 
+// normalizeOCRDigits replaces common OCR misreads of digits
+// O -> 0, l -> 1, I -> 1 (in numeric contexts)
+func normalizeOCRDigits(s string) string {
+	// Replace O with 0 only if it looks like it's in a number context
+	result := strings.ReplaceAll(s, "O", "0")
+	result = strings.ReplaceAll(result, "o", "0")
+	// Replace lowercase l with 1 in number patterns
+	result = strings.ReplaceAll(result, "l", "1")
+	return result
+}
+
 func parsePokemonOCR(result *OCRResult) {
 	text := result.RawText
 	upperText := strings.ToUpper(text)
 
+	// Normalize common OCR digit misreads for number extraction
+	normalizedText := normalizeOCRDigits(text)
+
 	// Extract card number pattern: XXX/YYY (e.g., "025/185", "TG17/TG30")
+	// Use normalized text to handle O/0 and l/1 confusion
 	cardNumRegex := regexp.MustCompile(`(?:^|\s)(\d{1,3})\s*/\s*(\d{1,3})(?:\s|$|[^0-9])`)
-	if matches := cardNumRegex.FindStringSubmatch(text); len(matches) >= 3 {
+	if matches := cardNumRegex.FindStringSubmatch(normalizedText); len(matches) >= 3 {
 		// Remove leading zeros
 		result.CardNumber = strings.TrimLeft(matches[1], "0")
 		if result.CardNumber == "" {
@@ -287,14 +302,14 @@ func parsePokemonOCR(result *OCRResult) {
 	// Detect foil/holo indicators
 	detectFoilIndicators(result, upperText)
 
-	// Detect rarity
+	// Detect rarity (before card name extraction so we can skip rarity lines)
 	detectPokemonRarity(result, upperText)
 
 	// Detect condition hints (grading labels, damage indicators)
 	detectConditionHints(result, upperText)
 
 	// Extract card name - usually first substantial line or after HP
-	result.CardName = extractPokemonCardName(result.AllLines)
+	result.CardName = extractPokemonCardName(result.AllLines, result.Rarity)
 }
 
 // detectFoilIndicators checks for foil/holographic card indicators
@@ -333,24 +348,28 @@ func detectFoilIndicators(result *OCRResult, upperText string) {
 
 // detectPokemonRarity detects card rarity from text
 func detectPokemonRarity(result *OCRResult, upperText string) {
-	// Rarity symbols often appear as text in OCR
-	rarityPatterns := map[string]string{
-		"ILLUSTRATION RARE": "Illustration Rare",
-		"SPECIAL ART RARE":  "Special Art Rare",
-		"HYPER RARE":        "Hyper Rare",
-		"SECRET RARE":       "Secret Rare",
-		"ULTRA RARE":        "Ultra Rare",
-		"DOUBLE RARE":       "Double Rare",
-		"RARE HOLO":         "Rare Holo",
-		"RARE":              "Rare",
-		"UNCOMMON":          "Uncommon",
-		"COMMON":            "Common",
-		"PROMO":             "Promo",
+	// Rarity patterns ordered from longest/most specific to shortest
+	// This ensures we match "SPECIAL ART RARE" before just "RARE"
+	rarityPatterns := []struct {
+		pattern string
+		rarity  string
+	}{
+		{"ILLUSTRATION RARE", "Illustration Rare"},
+		{"SPECIAL ART RARE", "Special Art Rare"},
+		{"SECRET RARE", "Secret Rare"},
+		{"DOUBLE RARE", "Double Rare"},
+		{"HYPER RARE", "Hyper Rare"},
+		{"ULTRA RARE", "Ultra Rare"},
+		{"RARE HOLO", "Rare Holo"},
+		{"UNCOMMON", "Uncommon"},
+		{"COMMON", "Common"},
+		{"PROMO", "Promo"},
+		{"RARE", "Rare"}, // Must be last among "RARE" variants
 	}
 
-	for pattern, rarity := range rarityPatterns {
-		if strings.Contains(upperText, pattern) {
-			result.Rarity = rarity
+	for _, rp := range rarityPatterns {
+		if strings.Contains(upperText, rp.pattern) {
+			result.Rarity = rp.rarity
 			return
 		}
 	}
@@ -368,12 +387,19 @@ func detectPokemonRarity(result *OCRResult, upperText string) {
 	}
 }
 
-func extractPokemonCardName(lines []string) string {
+func extractPokemonCardName(lines []string, detectedRarity string) string {
 	// Common patterns to skip
 	skipPatterns := []string{
 		"basic", "stage", "pokemon", "trainer", "energy",
 		"once during", "when you", "attack", "weakness",
 		"resistance", "retreat", "illus", "©", "nintendo",
+	}
+
+	// Also skip rarity-related words that might appear as separate lines
+	raritySkipPatterns := []string{
+		"holo", "rare", "uncommon", "common", "promo",
+		"gold", "rainbow", "secret", "full art", "reverse",
+		"illustration", "special art", "ultra", "hyper", "double",
 	}
 
 	for _, line := range lines {
@@ -398,6 +424,20 @@ func extractPokemonCardName(lines []string) string {
 			}
 		}
 		if skip {
+			continue
+		}
+
+		// Skip rarity-related lines (but not if line contains additional text like a card name)
+		// Only skip if the line is primarily a rarity indicator
+		isRarityLine := false
+		for _, pattern := range raritySkipPatterns {
+			// If the line is very short and matches a rarity pattern, skip it
+			if strings.Contains(lower, pattern) && len(line) < 20 {
+				isRarityLine = true
+				break
+			}
+		}
+		if isRarityLine {
 			continue
 		}
 
@@ -430,23 +470,89 @@ func extractPokemonCardName(lines []string) string {
 
 func parseMTGOCR(result *OCRResult) {
 	text := result.RawText
+	upperText := strings.ToUpper(text)
 
-	// MTG collector number pattern: e.g., "123/456" or "123"
-	collectorRegex := regexp.MustCompile(`(?:^|\s)(\d{1,4})\s*/\s*(\d{1,4})(?:\s|$)`)
+	// MTG collector number pattern: e.g., "123/456"
+	// Must be on its own line or have clear context - avoid matching power/toughness like "4/5"
+	// Look for larger numbers (collector numbers are typically 3+ digits in at least one part)
+	// or look for the pattern on its own line
+	collectorRegex := regexp.MustCompile(`(?:^|\n)\s*(\d{1,4})\s*/\s*(\d{2,4})\s*(?:\n|$)`)
 	if matches := collectorRegex.FindStringSubmatch(text); len(matches) >= 3 {
 		result.CardNumber = matches[1]
 		result.SetTotal = matches[2]
+	} else {
+		// Fallback: look for collector number patterns where total is > 50 (unlikely to be P/T)
+		fallbackRegex := regexp.MustCompile(`(\d{1,4})\s*/\s*(\d{2,4})`)
+		for _, match := range fallbackRegex.FindAllStringSubmatch(text, -1) {
+			if len(match) >= 3 {
+				// If the total is > 50, it's likely a collector number
+				// Power/toughness rarely exceeds 20
+				total := match[2]
+				if len(total) >= 2 {
+					result.CardNumber = match[1]
+					result.SetTotal = total
+					break
+				}
+			}
+		}
 	}
 
-	// MTG set codes are 3-4 letters: MKM, ONE, DMU, etc.
-	setCodeRegex := regexp.MustCompile(`\b([A-Z]{3,4})\b`)
-	upperText := strings.ToUpper(text)
+	// MTG set codes are 3-4 uppercase letters, typically on their own line
+	// Common false positives to skip
+	falsePositives := map[string]bool{
+		// Common English words
+		"THE": true, "AND": true, "FOR": true, "YOU": true, "ARE": true,
+		"WAS": true, "HAS": true, "HAD": true, "NOT": true, "ALL": true,
+		"CAN": true, "HER": true, "HIS": true, "BUT": true, "ITS": true,
+		"OUT": true, "GET": true, "HIM": true, "PUT": true, "END": true,
+		"ADD": true, "TAP": true, "MAY": true, "TWO": true, "ONE": false, // ONE is a real set!
+		"USE": true, "ANY": true, "OWN": true, "WAY": true, "NEW": true,
+		// Card type words
+		"FOIL": true, "BOLT": true, "RING": true, "VEIL": true, "SIX": true,
+		"SOL": true, "ART": true, "DEAL": true, "CARD": true, "DRAW": true,
+		"EACH": true, "FROM": true, "INTO": true, "ONTO": true, "THAT": true,
+		"THIS": true, "WITH": true, "YOUR": true,
+		// Foil indicators (should not be treated as set codes)
+		"ETCHED": true, "SURGE": true,
+		// Common words that appear in card text
+		"THEN": true, "WHEN": true, "LIFE": true, "LOSE": true, "GAIN": true,
+		"DIES": true, "TURN": true, "COPY": true, "COST": true, "MANA": true,
+		"STEP": true, "NEXT": true, "MILL": true, "CAST": true, "PLAY": true,
+		// Common artist name fragments (first/last names that look like set codes)
+		"RAHN": true, "JOHN": true, "MARK": true, "ADAM": true, "CARL": true,
+		"ERIC": true, "GREG": true, "IVAN": true, "JACK": true, "KARL": true,
+		"LARS": true, "MIKE": true, "NICK": true, "NOAH": true, "PAUL": true,
+		"RYAN": true, "SEAN": true, "TODD": true, "TONY": true, "ZACK": true,
+		// Common illustrator text
+		"ILLUS": true, "ILLU": true,
+	}
+
+	// Look for set code - prefer codes that appear on their own line
+	// MTG set codes can start with numbers (like 2XM, 2LU) or letters
+	setCodeRegex := regexp.MustCompile(`\b([A-Z0-9][A-Z0-9]{2,3})\b`)
+	var candidates []string
 	for _, match := range setCodeRegex.FindAllStringSubmatch(upperText, -1) {
 		code := match[1]
-		// Skip common false positives
-		if code != "THE" && code != "AND" && code != "FOR" && code != "YOU" {
-			result.SetCode = code
-			break
+		// Skip pure numbers
+		if regexp.MustCompile(`^\d+$`).MatchString(code) {
+			continue
+		}
+		if !falsePositives[code] {
+			candidates = append(candidates, code)
+		}
+	}
+
+	// If we have candidates, prefer ones that look like set codes (3 letters, all uppercase)
+	// and appear later in the text (set codes are typically at the bottom of cards)
+	if len(candidates) > 0 {
+		// Take the last candidate that isn't a common word
+		for i := len(candidates) - 1; i >= 0; i-- {
+			code := candidates[i]
+			// Valid MTG set codes are 3-4 characters
+			if len(code) >= 3 && len(code) <= 4 {
+				result.SetCode = code
+				break
+			}
 		}
 	}
 
