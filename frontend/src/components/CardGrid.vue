@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { formatPrice, isPriceStale, getItemValue } from '../utils/formatters'
 
 const props = defineProps({
   cards: {
@@ -13,28 +13,6 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['select'])
-
-const formatPrice = (price) => {
-  if (!price) return '-'
-  return `$${price.toFixed(2)}`
-}
-
-const getItemValue = (item) => {
-  const card = item.card || item
-  const quantity = item.quantity || 1
-  if (item.foil && card?.price_foil_usd) {
-    return card.price_foil_usd * quantity
-  }
-  return (card?.price_usd || 0) * quantity
-}
-
-const isPriceStale = (item) => {
-  const card = item.card || item
-  if (!card.price_updated_at) return true
-  const date = new Date(card.price_updated_at)
-  const now = new Date()
-  return (now - date) > 24 * 60 * 60 * 1000 // 24 hours
-}
 </script>
 
 <template>

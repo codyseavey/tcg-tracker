@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/card.dart';
 import '../models/collection_item.dart';
@@ -11,9 +12,15 @@ class ApiService {
   static const String _serverUrlKey = 'server_url';
   static const String _defaultServerUrl = 'http://localhost:8080';
 
-  final http.Client _httpClient;
+  // Use legacy key for migration from SharedPreferences
+  static const String _legacyServerUrlKey = 'server_url';
 
-  ApiService({http.Client? httpClient}) : _httpClient = httpClient ?? http.Client();
+  final http.Client _httpClient;
+  final FlutterSecureStorage _secureStorage;
+
+  ApiService({http.Client? httpClient, FlutterSecureStorage? secureStorage})
+      : _httpClient = httpClient ?? http.Client(),
+        _secureStorage = secureStorage ?? const FlutterSecureStorage();
 
   /// Safely decode JSON, returning a map with error key if decoding fails
   Map<String, dynamic> _safeJsonDecode(String body) {
@@ -25,13 +32,36 @@ class ApiService {
   }
 
   Future<String> getServerUrl() async {
+    // First, try to get from secure storage
+    String? serverUrl = await _secureStorage.read(key: _serverUrlKey);
+
+    if (serverUrl != null) {
+      return serverUrl;
+    }
+
+    // Migration: Check if URL exists in SharedPreferences (legacy storage)
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString(_serverUrlKey) ?? _defaultServerUrl;
+    final legacyUrl = prefs.getString(_legacyServerUrlKey);
+
+    if (legacyUrl != null) {
+      // Migrate to secure storage
+      await _secureStorage.write(key: _serverUrlKey, value: legacyUrl);
+      // Remove from legacy storage
+      await prefs.remove(_legacyServerUrlKey);
+      return legacyUrl;
+    }
+
+    return _defaultServerUrl;
   }
 
   Future<void> setServerUrl(String url) async {
+    await _secureStorage.write(key: _serverUrlKey, value: url);
+
+    // Also clear from legacy storage if it exists (migration cleanup)
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_serverUrlKey, url);
+    if (prefs.containsKey(_legacyServerUrlKey)) {
+      await prefs.remove(_legacyServerUrlKey);
+    }
   }
 
   Future<CardSearchResult> searchCards(String query, String game) async {
@@ -281,6 +311,62 @@ class ApiService {
       return response.statusCode == 200;
     } catch (e) {
       return false;
+    }
+  }
+
+  /// Check if server-side OCR is available
+  Future<bool> isServerOCRAvailable() async {
+    try {
+      final serverUrl = await getServerUrl();
+      final uri = Uri.parse('$serverUrl/api/cards/ocr-status');
+      final response = await _httpClient.get(uri).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw Exception('Request timed out'),
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        return data['server_ocr_available'] ?? false;
+      }
+      return false;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// Identify card from an image using server-side OCR
+  /// This is an alternative to client-side ML Kit OCR
+  Future<ScanResult> identifyCardFromImage(
+    List<int> imageBytes,
+    String game,
+  ) async {
+    final serverUrl = await getServerUrl();
+    final uri = Uri.parse('$serverUrl/api/cards/identify-image');
+
+    // Create multipart request
+    final request = http.MultipartRequest('POST', uri);
+    request.fields['game'] = game;
+    request.files.add(http.MultipartFile.fromBytes(
+      'image',
+      imageBytes,
+      filename: 'card_image.jpg',
+    ));
+
+    final streamedResponse = await request.send().timeout(
+      const Duration(seconds: 60), // Longer timeout for image processing
+      onTimeout: () => throw Exception('Request timed out'),
+    );
+
+    final response = await http.Response.fromStream(streamedResponse);
+
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      return ScanResult.fromJson(data);
+    } else if (response.statusCode == 503) {
+      throw Exception('Server-side OCR is not available');
+    } else {
+      final error = _safeJsonDecode(response.body);
+      throw Exception(error['error'] ?? 'Failed to identify card from image');
     }
   }
 }

@@ -24,7 +24,7 @@ func Initialize(dbPath string) error {
 	log.Println("Database connected successfully")
 
 	// Auto-migrate the schema
-	err = DB.AutoMigrate(&models.Card{}, &models.CollectionItem{})
+	err = DB.AutoMigrate(&models.Card{}, &models.CollectionItem{}, &models.CardPrice{})
 	if err != nil {
 		return err
 	}

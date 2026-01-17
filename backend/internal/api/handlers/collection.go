@@ -207,7 +207,9 @@ func (h *CollectionHandler) GetStats(c *gin.Context) {
 	db.Model(&models.CollectionItem{}).Distinct("card_id").Count(&uniqueCount)
 	stats.UniqueCards = int(uniqueCount)
 
-	// Calculate values and counts by game
+	// Calculate values and counts by game using condition-appropriate prices
+	// First, try to use condition-specific prices from card_prices table
+	// Falls back to card base prices (NM) if no condition price exists
 	type gameStats struct {
 		Game       string
 		Count      int
@@ -216,7 +218,31 @@ func (h *CollectionHandler) GetStats(c *gin.Context) {
 
 	var gameResults []gameStats
 	db.Table("collection_items").
-		Select("cards.game, SUM(collection_items.quantity) as count, SUM(CASE WHEN collection_items.foil THEN cards.price_foil_usd ELSE cards.price_usd END * collection_items.quantity) as total_value").
+		Select(`
+			cards.game,
+			SUM(collection_items.quantity) as count,
+			SUM(
+				COALESCE(
+					(SELECT cp.price_usd FROM card_prices cp
+					 WHERE cp.card_id = cards.id
+					 AND cp.condition = (
+						CASE collection_items.condition
+							WHEN 'M' THEN 'NM'
+							WHEN 'NM' THEN 'NM'
+							WHEN 'EX' THEN 'LP'
+							WHEN 'LP' THEN 'LP'
+							WHEN 'GD' THEN 'MP'
+							WHEN 'PL' THEN 'HP'
+							WHEN 'PR' THEN 'DMG'
+							ELSE 'NM'
+						END
+					 )
+					 AND cp.foil = collection_items.foil
+					 LIMIT 1),
+					CASE WHEN collection_items.foil THEN cards.price_foil_usd ELSE cards.price_usd END
+				) * collection_items.quantity
+			) as total_value
+		`).
 		Joins("JOIN cards ON cards.id = collection_items.card_id").
 		Group("cards.game").
 		Scan(&gameResults)

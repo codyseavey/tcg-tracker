@@ -41,6 +41,8 @@ export const useCollectionStore = defineStore('collection', {
         this.stats = await collectionService.getStats()
       } catch (err) {
         console.error('Failed to fetch stats:', err)
+        // Set error state so UI can display the failure
+        this.error = 'Failed to load collection statistics'
       }
     },
 

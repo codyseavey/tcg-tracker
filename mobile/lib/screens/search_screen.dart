@@ -194,6 +194,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 itemBuilder: (context, index) {
                   final card = provider.searchResults[index];
                   return CollectionCard(
+                    key: ValueKey(card.id),
                     card: card,
                     onTap: () => _openCardDetail(context, card),
                   );

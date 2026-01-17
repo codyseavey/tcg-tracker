@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/card.dart';
 import '../services/api_service.dart';
+import '../utils/constants.dart';
 
 class ScanResultScreen extends StatefulWidget {
   final List<CardModel> cards;
@@ -27,8 +28,8 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
   late bool _foil;
   bool _isAdding = false;
 
-  // Condition codes: M=Mint, NM=Near Mint, LP=Lightly Played, MP=Moderately Played, HP=Heavily Played, D=Damaged
-  final List<String> _conditions = ['M', 'NM', 'LP', 'MP', 'HP', 'D'];
+  // Use unified condition codes from constants
+  List<String> get _conditions => CardConditions.codes;
 
   @override
   void initState() {
@@ -446,22 +447,7 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
   }
 
   String _getConditionDescription(String condition) {
-    switch (condition) {
-      case 'M':
-        return 'Mint';
-      case 'NM':
-        return 'Near Mint';
-      case 'LP':
-        return 'Lightly Played';
-      case 'MP':
-        return 'Moderately Played';
-      case 'HP':
-        return 'Heavily Played';
-      case 'D':
-        return 'Damaged';
-      default:
-        return condition;
-    }
+    return CardConditions.getLabel(condition);
   }
 
   Color _getConfidenceColor(BuildContext context, double confidence) {
@@ -488,33 +474,86 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
                     itemCount: widget.cards.length,
                     itemBuilder: (context, index) {
                       final card = widget.cards[index];
+                      final isBestMatch = index == 0 && widget.cards.length > 1;
                       return Card(
                         margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        child: ListTile(
-                          leading: card.imageUrl != null
-                              ? ClipRRect(
-                                  borderRadius: BorderRadius.circular(4),
-                                  child: SizedBox(
-                                    width: MediaQuery.of(context).size.width * 0.12,
-                                    child: AspectRatio(
-                                      aspectRatio: 2.5 / 3.5,
-                                      child: Image.network(
-                                        card.imageUrl!,
-                                        fit: BoxFit.cover,
-                                        errorBuilder: (context, error, stackTrace) => const Icon(Icons.image),
+                        color: isBestMatch
+                            ? Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.5)
+                            : null,
+                        shape: isBestMatch
+                            ? RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                                side: BorderSide(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  width: 2,
+                                ),
+                              )
+                            : null,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (isBestMatch)
+                              Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.primary,
+                                  borderRadius: const BorderRadius.only(
+                                    topLeft: Radius.circular(10),
+                                    topRight: Radius.circular(10),
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.star,
+                                      size: 16,
+                                      color: Theme.of(context).colorScheme.onPrimary,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Best Match',
+                                      style: TextStyle(
+                                        color: Theme.of(context).colorScheme.onPrimary,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 12,
                                       ),
                                     ),
-                                  ),
-                                )
-                              : const Icon(Icons.image),
-                          title: Text(card.name),
-                          subtitle: Text('${card.displaySet} • ${card.displayPrice}'),
-                          trailing: IconButton(
-                            icon: const Icon(Icons.add_circle),
-                            color: Theme.of(context).colorScheme.primary,
-                            onPressed: () => _showAddDialog(card),
-                          ),
-                          onTap: () => _showAddDialog(card),
+                                  ],
+                                ),
+                              ),
+                            ListTile(
+                              leading: card.imageUrl != null
+                                  ? ClipRRect(
+                                      borderRadius: BorderRadius.circular(4),
+                                      child: SizedBox(
+                                        width: MediaQuery.of(context).size.width * 0.12,
+                                        child: AspectRatio(
+                                          aspectRatio: 2.5 / 3.5,
+                                          child: Image.network(
+                                            card.imageUrl!,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (context, error, stackTrace) => const Icon(Icons.image),
+                                          ),
+                                        ),
+                                      ),
+                                    )
+                                  : const Icon(Icons.image),
+                              title: Text(
+                                card.name,
+                                style: isBestMatch
+                                    ? const TextStyle(fontWeight: FontWeight.bold)
+                                    : null,
+                              ),
+                              subtitle: Text('${card.displaySet} • ${card.displayPrice}'),
+                              trailing: IconButton(
+                                icon: const Icon(Icons.add_circle),
+                                color: Theme.of(context).colorScheme.primary,
+                                onPressed: () => _showAddDialog(card),
+                              ),
+                              onTap: () => _showAddDialog(card),
+                            ),
+                          ],
                         ),
                       );
                     },

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { priceService } from '../services/api'
+import { formatPrice, formatTimeAgo, isPriceStale as checkPriceStale } from '../utils/formatters'
 
 const props = defineProps({
   item: {
@@ -25,36 +26,13 @@ const priceError = ref(null)
 const conditions = [
   { value: 'M', label: 'Mint' },
   { value: 'NM', label: 'Near Mint' },
-  { value: 'EX', label: 'Excellent' },
-  { value: 'GD', label: 'Good' },
   { value: 'LP', label: 'Light Play' },
-  { value: 'PL', label: 'Played' },
-  { value: 'PR', label: 'Poor' }
+  { value: 'MP', label: 'Moderate Play' },
+  { value: 'HP', label: 'Heavy Play' },
+  { value: 'D', label: 'Damaged' }
 ]
 
-const formatPrice = (price) => {
-  if (!price) return '-'
-  return `$${price.toFixed(2)}`
-}
-
-const formatTimeAgo = (dateString) => {
-  if (!dateString) return null
-  const date = new Date(dateString)
-  const now = new Date()
-  const seconds = Math.floor((now - date) / 1000)
-
-  if (seconds < 60) return 'just now'
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`
-  return `${Math.floor(seconds / 86400)}d ago`
-}
-
-const isPriceStale = computed(() => {
-  if (!card.value.price_updated_at) return true
-  const date = new Date(card.value.price_updated_at)
-  const now = new Date()
-  return (now - date) > 24 * 60 * 60 * 1000 // 24 hours
-})
+const isPriceStale = computed(() => checkPriceStale(card.value))
 
 const priceAge = computed(() => formatTimeAgo(card.value.price_updated_at))
 
@@ -113,24 +91,34 @@ const handleRemove = () => {
 </script>
 
 <template>
-  <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4" @click.self="emit('close')">
+  <div
+    class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+    @click.self="emit('close')"
+    role="dialog"
+    aria-modal="true"
+    :aria-labelledby="'card-title-' + card.id"
+  >
     <div class="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
       <div class="flex flex-col md:flex-row">
         <div class="md:w-1/2 p-4">
           <img
             :src="card.image_url_large || card.image_url"
-            :alt="card.name"
+            :alt="card.name + ' card image'"
             class="w-full rounded-lg shadow"
           />
         </div>
         <div class="md:w-1/2 p-6">
           <div class="flex justify-between items-start mb-4">
             <div>
-              <h2 class="text-2xl font-bold text-gray-800">{{ card.name }}</h2>
+              <h2 :id="'card-title-' + card.id" class="text-2xl font-bold text-gray-800">{{ card.name }}</h2>
               <p class="text-gray-500">{{ card.set_name }}</p>
             </div>
-            <button @click="emit('close')" class="text-gray-400 hover:text-gray-600">
-              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <button
+              @click="emit('close')"
+              class="text-gray-400 hover:text-gray-600"
+              aria-label="Close card details"
+            >
+              <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
@@ -190,17 +178,19 @@ const handleRemove = () => {
 
           <div class="border-t pt-4 space-y-4">
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+              <label :for="'quantity-' + card.id" class="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
               <input
+                :id="'quantity-' + card.id"
                 v-model.number="quantity"
                 type="number"
                 min="1"
                 class="w-full border rounded-lg px-3 py-2"
+                aria-describedby="quantity-help"
               />
             </div>
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Condition</label>
-              <select v-model="condition" class="w-full border rounded-lg px-3 py-2">
+              <label :for="'condition-' + card.id" class="block text-sm font-medium text-gray-700 mb-1">Condition</label>
+              <select :id="'condition-' + card.id" v-model="condition" class="w-full border rounded-lg px-3 py-2">
                 <option v-for="c in conditions" :key="c.value" :value="c.value">
                   {{ c.label }}
                 </option>
@@ -210,10 +200,10 @@ const handleRemove = () => {
               <input
                 v-model="foil"
                 type="checkbox"
-                id="foil"
+                :id="'foil-' + card.id"
                 class="rounded border-gray-300 text-blue-600 mr-2"
               />
-              <label for="foil" class="text-sm font-medium text-gray-700">Foil</label>
+              <label :for="'foil-' + card.id" class="text-sm font-medium text-gray-700">Foil</label>
             </div>
           </div>
 

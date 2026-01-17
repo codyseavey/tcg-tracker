@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../models/card.dart';
 import '../models/collection_item.dart';
 import '../providers/collection_provider.dart';
+import '../utils/constants.dart';
 
 class CardDetailScreen extends StatefulWidget {
   final CollectionItem? collectionItem;
@@ -30,25 +31,9 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
   CardModel get _card => widget.collectionItem?.card ?? widget.card!;
   bool get _isCollectionItem => widget.collectionItem != null;
 
-  static const List<String> _conditions = [
-    'M',
-    'NM',
-    'EX',
-    'GD',
-    'LP',
-    'PL',
-    'PR',
-  ];
-
-  static const Map<String, String> _conditionLabels = {
-    'M': 'Mint',
-    'NM': 'Near Mint',
-    'EX': 'Excellent',
-    'GD': 'Good',
-    'LP': 'Light Play',
-    'PL': 'Played',
-    'PR': 'Poor',
-  };
+  // Use unified condition codes from constants
+  List<String> get _conditions => CardConditions.codes;
+  Map<String, String> get _conditionLabels => CardConditions.labels;
 
   @override
   void initState() {

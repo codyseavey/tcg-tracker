@@ -1,8 +1,10 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import Dashboard from './views/Dashboard.vue'
-import Collection from './views/Collection.vue'
-import AddCard from './views/AddCard.vue'
-import NotFound from './views/NotFound.vue'
+
+// Lazy load views for better initial load performance
+const Dashboard = () => import('./views/Dashboard.vue')
+const Collection = () => import('./views/Collection.vue')
+const AddCard = () => import('./views/AddCard.vue')
+const NotFound = () => import('./views/NotFound.vue')
 
 const routes = [
   {

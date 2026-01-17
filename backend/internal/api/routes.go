@@ -13,7 +13,7 @@ import (
 	"github.com/codyseavey/tcg-tracker/backend/internal/services"
 )
 
-func SetupRouter(scryfallService *services.ScryfallService, pokemonService *services.PokemonHybridService, priceWorker *services.PriceWorker) *gin.Engine {
+func SetupRouter(scryfallService *services.ScryfallService, pokemonService *services.PokemonHybridService, priceWorker *services.PriceWorker, priceService *services.PriceService) *gin.Engine {
 	router := gin.Default()
 
 	// Get frontend dist path from env
@@ -35,7 +35,7 @@ func SetupRouter(scryfallService *services.ScryfallService, pokemonService *serv
 	// Initialize handlers
 	cardHandler := handlers.NewCardHandler(scryfallService, pokemonService)
 	collectionHandler := handlers.NewCollectionHandler(scryfallService, pokemonService)
-	priceHandler := handlers.NewPriceHandler(priceWorker)
+	priceHandler := handlers.NewPriceHandler(priceWorker, priceService)
 
 	// API routes
 	api := router.Group("/api")
@@ -45,7 +45,10 @@ func SetupRouter(scryfallService *services.ScryfallService, pokemonService *serv
 		{
 			cards.GET("/search", cardHandler.SearchCards)
 			cards.GET("/:id", cardHandler.GetCard)
+			cards.GET("/:id/prices", priceHandler.GetCardPrices)
 			cards.POST("/identify", cardHandler.IdentifyCard)
+			cards.POST("/identify-image", cardHandler.IdentifyCardFromImage)
+			cards.GET("/ocr-status", cardHandler.GetOCRStatus)
 			cards.POST("/:id/refresh-price", priceHandler.RefreshCardPrice)
 		}
 

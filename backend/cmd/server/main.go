@@ -3,8 +3,12 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
 	"strconv"
+	"syscall"
+	"time"
 
 	"github.com/codyseavey/tcg-tracker/backend/internal/api"
 	"github.com/codyseavey/tcg-tracker/backend/internal/database"
@@ -25,6 +29,7 @@ func main() {
 
 	// Initialize services
 	scryfallService := services.NewScryfallService()
+	tcgdexService := services.NewTCGdexService()
 
 	// Initialize Pokemon hybrid service (local data + TCGdex for prices)
 	dataDir := os.Getenv("POKEMON_DATA_DIR")
@@ -38,6 +43,19 @@ func main() {
 	}
 	log.Printf("Loaded %d Pokemon cards from %d sets", pokemonService.GetCardCount(), pokemonService.GetSetCount())
 
+	// Initialize JustTCG service for condition-based pricing
+	justTCGAPIKey := os.Getenv("JUSTTCG_API_KEY")
+	justTCGDailyLimit := 100 // Default free tier limit
+	if limitStr := os.Getenv("JUSTTCG_DAILY_LIMIT"); limitStr != "" {
+		if limit, err := strconv.Atoi(limitStr); err == nil {
+			justTCGDailyLimit = limit
+		}
+	}
+	justTCGService := services.NewJustTCGService(justTCGAPIKey, justTCGDailyLimit)
+
+	// Initialize price service with fallback chain
+	priceService := services.NewPriceService(justTCGService, tcgdexService, scryfallService, database.GetDB())
+
 	// Initialize price worker
 	dailyLimit := 100 // Default daily API request limit
 	if limitStr := os.Getenv("POKEMON_PRICE_DAILY_LIMIT"); limitStr != "" {
@@ -45,14 +63,17 @@ func main() {
 			dailyLimit = limit
 		}
 	}
-	priceWorker := services.NewPriceWorker(pokemonService, dailyLimit)
+	priceWorker := services.NewPriceWorker(priceService, pokemonService, dailyLimit)
+
+	// Create a cancellable context for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// Start price worker in background
-	ctx := context.Background()
 	go priceWorker.Start(ctx)
 
 	// Setup router
-	router := api.SetupRouter(scryfallService, pokemonService, priceWorker)
+	router := api.SetupRouter(scryfallService, pokemonService, priceWorker, priceService)
 
 	// Get port from environment
 	port := os.Getenv("PORT")
@@ -60,8 +81,36 @@ func main() {
 		port = "8080"
 	}
 
-	log.Printf("Starting server on port %s", port)
-	if err := router.Run(":" + port); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+	// Create HTTP server for graceful shutdown
+	srv := &http.Server{
+		Addr:    ":" + port,
+		Handler: router,
 	}
+
+	// Start server in a goroutine
+	go func() {
+		log.Printf("Starting server on port %s", port)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Failed to start server: %v", err)
+		}
+	}()
+
+	// Wait for interrupt signal
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down server...")
+
+	// Cancel the context to stop the price worker
+	cancel()
+
+	// Give outstanding requests a deadline to complete
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Server forced to shutdown: %v", err)
+	}
+
+	log.Println("Server exited")
 }

@@ -264,30 +264,46 @@ func (s *PokemonHybridService) loadCachedPrices(cards []models.Card) {
 	}
 }
 
-// enrichWithPricesAsync fetches prices from API in background and updates database
+// enrichWithPricesAsync fetches prices from API in background and updates database.
+// This function only updates the database - it does not modify the input slice.
+// Card IDs are copied to avoid any race conditions with the caller.
 func (s *PokemonHybridService) enrichWithPricesAsync(cards []models.Card) {
+	// Copy card IDs and price sources to avoid race conditions
+	type cardInfo struct {
+		id          string
+		priceSource string
+	}
+	cardInfos := make([]cardInfo, len(cards))
+	for i, c := range cards {
+		cardInfos[i] = cardInfo{id: c.ID, priceSource: c.PriceSource}
+	}
+
 	db := database.GetDB()
 
-	for _, card := range cards {
-		if card.PriceSource == "cached" {
+	for _, info := range cardInfos {
+		if info.priceSource == "cached" {
 			continue // Already have fresh price
 		}
 
 		// Fetch price from TCGdex
-		priceCard, err := s.tcgdexService.GetCard(card.ID)
+		priceCard, err := s.tcgdexService.GetCard(info.id)
 		if err != nil {
-			log.Printf("Failed to fetch price for %s: %v", card.ID, err)
+			log.Printf("Failed to fetch price for %s: %v", info.id, err)
 			continue
 		}
 
 		if priceCard != nil && (priceCard.PriceUSD > 0 || priceCard.PriceFoilUSD > 0) {
 			now := time.Now()
-			card.PriceUSD = priceCard.PriceUSD
-			card.PriceFoilUSD = priceCard.PriceFoilUSD
-			card.PriceUpdatedAt = &now
-			card.LastPriceCheck = &now
-			card.PriceSource = "tcgdex"
-			db.Save(&card)
+			// Update the database directly instead of modifying the input slice
+			if err := db.Model(&models.Card{}).Where("id = ?", info.id).Updates(map[string]interface{}{
+				"price_usd":        priceCard.PriceUSD,
+				"price_foil_usd":   priceCard.PriceFoilUSD,
+				"price_updated_at": &now,
+				"last_price_check": &now,
+				"price_source":     "tcgdex",
+			}).Error; err != nil {
+				log.Printf("Failed to save price for %s: %v", info.id, err)
+			}
 		}
 	}
 }

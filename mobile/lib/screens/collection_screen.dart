@@ -187,6 +187,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
             itemBuilder: (context, index) {
               final item = provider.items[index];
               return CollectionCard(
+                key: ValueKey(item.id),
                 collectionItem: item,
                 onTap: () => _openCardDetail(context, item),
               );

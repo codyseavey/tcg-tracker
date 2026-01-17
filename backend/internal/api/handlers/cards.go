@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"net/http"
 	"sort"
 	"strings"
@@ -13,14 +14,16 @@ import (
 )
 
 type CardHandler struct {
-	scryfallService *services.ScryfallService
-	pokemonService  *services.PokemonHybridService
+	scryfallService  *services.ScryfallService
+	pokemonService   *services.PokemonHybridService
+	serverOCRService *services.ServerOCRService
 }
 
 func NewCardHandler(scryfall *services.ScryfallService, pokemon *services.PokemonHybridService) *CardHandler {
 	return &CardHandler{
-		scryfallService: scryfall,
-		pokemonService:  pokemon,
+		scryfallService:  scryfall,
+		pokemonService:   pokemon,
+		serverOCRService: services.NewServerOCRService(),
 	}
 }
 
@@ -51,10 +54,13 @@ func (h *CardHandler) SearchCards(c *gin.Context) {
 		return
 	}
 
-	// Cache cards in database
+	// Cache cards in database (log errors but don't fail the request)
 	db := database.GetDB()
-	for _, card := range result.Cards {
-		db.Save(&card)
+	for i := range result.Cards {
+		if err := db.Save(&result.Cards[i]).Error; err != nil {
+			// Log the error but continue - caching failure shouldn't fail the search
+			c.Writer.Header().Set("X-Cache-Warning", "Some cards failed to cache")
+		}
 	}
 
 	c.JSON(http.StatusOK, result)
@@ -100,8 +106,10 @@ func (h *CardHandler) GetCard(c *gin.Context) {
 		return
 	}
 
-	// Cache the card
-	db.Save(card)
+	// Cache the card (log error but don't fail the request)
+	if err := db.Save(card).Error; err != nil {
+		c.Writer.Header().Set("X-Cache-Warning", "Failed to cache card")
+	}
 
 	c.JSON(http.StatusOK, card)
 }
@@ -121,49 +129,11 @@ func (h *CardHandler) IdentifyCard(c *gin.Context) {
 	// Parse OCR text to extract card details, incorporating image analysis if provided
 	parsed := services.ParseOCRTextWithAnalysis(req.Text, req.Game, req.ImageAnalysis)
 
-	// Use card name for search (fall back to raw text if no name extracted)
-	searchQuery := parsed.CardName
-	if searchQuery == "" {
-		searchQuery = req.Text
-	}
-
-	// Search using the extracted text
-	var result *models.CardSearchResult
-	var err error
-
-	if req.Game == "pokemon" {
-		result, err = h.pokemonService.SearchCards(searchQuery)
-
-		// If we have a set code and card number, try to find the exact card
-		if result != nil && parsed.SetCode != "" && parsed.CardNumber != "" {
-			exactCard := h.pokemonService.GetCardBySetAndNumber(
-				strings.ToLower(parsed.SetCode),
-				parsed.CardNumber,
-			)
-			if exactCard != nil {
-				// Put exact match at the front
-				result.Cards = append([]models.Card{*exactCard}, result.Cards...)
-			}
-		}
-	} else {
-		// Default to MTG or search both
-		result, err = h.scryfallService.SearchCards(searchQuery)
-	}
-
+	// Search and match cards using shared logic
+	result, err := h.searchAndMatchCards(c, parsed, req.Game, req.Text)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
-	}
-
-	// Filter and rank results based on parsed OCR data
-	if result != nil && len(result.Cards) > 0 {
-		result.Cards = rankCardMatches(result.Cards, parsed)
-	}
-
-	// Cache cards in database (so they can be added to collection)
-	db := database.GetDB()
-	for _, card := range result.Cards {
-		db.Save(&card)
 	}
 
 	// Include full parsing info in response for mobile app
@@ -189,6 +159,190 @@ func (h *CardHandler) IdentifyCard(c *gin.Context) {
 			"foil_confidence":      parsed.FoilConfidence,
 		},
 	})
+}
+
+// IdentifyCardFromImage processes an uploaded image with server-side OCR
+// and returns card matches
+func (h *CardHandler) IdentifyCardFromImage(c *gin.Context) {
+	// Check if server OCR is available
+	if !h.serverOCRService.IsAvailable() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error":   "Server-side OCR is not available",
+			"message": "Please use client-side OCR instead",
+		})
+		return
+	}
+
+	// Get game parameter
+	game := c.PostForm("game")
+	if game == "" {
+		game = c.Query("game")
+	}
+	if game != "pokemon" && game != "mtg" {
+		game = "pokemon" // Default to Pokemon
+	}
+
+	// Handle image - check both file upload and base64 JSON body
+	var ocrResult *services.ServerOCRResult
+	var err error
+
+	// Try to get uploaded file
+	file, err := c.FormFile("image")
+	if err == nil {
+		// Handle file upload
+		src, err := file.Open()
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to open uploaded file"})
+			return
+		}
+		defer src.Close()
+
+		// Read file content
+		var buf bytes.Buffer
+		if _, err := buf.ReadFrom(src); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read uploaded file"})
+			return
+		}
+
+		ocrResult, err = h.serverOCRService.ProcessImageBytes(buf.Bytes())
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "OCR processing failed",
+				"details": ocrResult.Error,
+			})
+			return
+		}
+	} else {
+		// Try JSON body with base64 image
+		var req struct {
+			Image string `json:"image"` // Base64 encoded image
+			Game  string `json:"game"`
+		}
+
+		if err := c.ShouldBindJSON(&req); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{
+				"error":   "No image provided",
+				"message": "Upload an image file or provide base64 encoded image in JSON body",
+			})
+			return
+		}
+
+		if req.Game != "" {
+			game = req.Game
+		}
+
+		ocrResult, err = h.serverOCRService.ProcessBase64Image(req.Image)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "OCR processing failed",
+				"details": ocrResult.Error,
+			})
+			return
+		}
+	}
+
+	// Parse the OCR text
+	text := strings.Join(ocrResult.Lines, "\n")
+	parsed := services.ParseOCRText(text, game)
+
+	// Search and match cards using shared logic
+	result, err := h.searchAndMatchCards(c, parsed, game, text)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Return results
+	c.JSON(http.StatusOK, gin.H{
+		"cards":       result.Cards,
+		"total_count": result.TotalCount,
+		"has_more":    result.HasMore,
+		"ocr": gin.H{
+			"text":       text,
+			"lines":      ocrResult.Lines,
+			"confidence": ocrResult.Confidence,
+		},
+		"parsed": gin.H{
+			"card_name":       parsed.CardName,
+			"card_number":     parsed.CardNumber,
+			"set_total":       parsed.SetTotal,
+			"set_code":        parsed.SetCode,
+			"set_name":        parsed.SetName,
+			"hp":              parsed.HP,
+			"rarity":          parsed.Rarity,
+			"is_foil":         parsed.IsFoil,
+			"foil_indicators": parsed.FoilIndicators,
+			"confidence":      parsed.Confidence,
+		},
+	})
+}
+
+// GetOCRStatus returns the status of server-side OCR capability
+func (h *CardHandler) GetOCRStatus(c *gin.Context) {
+	available := h.serverOCRService.IsAvailable()
+
+	c.JSON(http.StatusOK, gin.H{
+		"server_ocr_available": available,
+		"message": func() string {
+			if available {
+				return "Server-side OCR is available. You can upload images for processing."
+			}
+			return "Server-side OCR is not available. Please use client-side OCR."
+		}(),
+	})
+}
+
+// searchAndMatchCards performs card search and matching based on OCR results.
+// This is shared logic between IdentifyCard and IdentifyCardFromImage.
+func (h *CardHandler) searchAndMatchCards(c *gin.Context, parsed *services.OCRResult, game, fallbackText string) (*models.CardSearchResult, error) {
+	// Determine search query (use card name or fall back to raw text)
+	searchQuery := parsed.CardName
+	if searchQuery == "" {
+		searchQuery = fallbackText
+	}
+
+	// Search using the extracted text
+	var result *models.CardSearchResult
+	var err error
+
+	if game == "pokemon" {
+		result, err = h.pokemonService.SearchCards(searchQuery)
+
+		// If we have a set code and card number, try to find the exact card
+		if result != nil && parsed.SetCode != "" && parsed.CardNumber != "" {
+			exactCard := h.pokemonService.GetCardBySetAndNumber(
+				strings.ToLower(parsed.SetCode),
+				parsed.CardNumber,
+			)
+			if exactCard != nil {
+				// Put exact match at the front
+				result.Cards = append([]models.Card{*exactCard}, result.Cards...)
+			}
+		}
+	} else {
+		// Default to MTG
+		result, err = h.scryfallService.SearchCards(searchQuery)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Filter and rank results based on parsed OCR data
+	if result != nil && len(result.Cards) > 0 {
+		result.Cards = rankCardMatches(result.Cards, parsed)
+	}
+
+	// Cache cards in database (log errors but don't fail the request)
+	db := database.GetDB()
+	for i := range result.Cards {
+		if err := db.Save(&result.Cards[i]).Error; err != nil {
+			// Log the error but continue - caching failure shouldn't fail identification
+			c.Writer.Header().Set("X-Cache-Warning", "Some cards failed to cache")
+		}
+	}
+
+	return result, nil
 }
 
 // rankCardMatches reorders cards based on how well they match the OCR data
