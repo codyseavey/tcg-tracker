@@ -2914,9 +2914,9 @@ cause lightning storm< IV. 12 #25
 
 Mus. Mitsuhiro Arita ©1995, 96, 96 lic hSE crower: 581102 @`,
 			wantCardName:   "Pikachu",
-			wantCardNumber: "",     // Card number format is corrupted
-			wantSetCode:    "",     // No clear set code
-			wantIsWotC:     true,   // Should detect ©1995
+			wantCardNumber: "",   // Card number format is corrupted
+			wantSetCode:    "",   // No clear set code
+			wantIsWotC:     true, // Should detect ©1995
 		},
 		{
 			name: "Base Set Pikachu - cleaned OCR output",

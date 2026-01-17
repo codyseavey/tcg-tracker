@@ -569,16 +569,16 @@ func parsePokemonOCR(result *OCRResult) {
 	// Tier 1: Explicit HP patterns (with "HP" text) - most reliable
 	// Tier 2: Fallback patterns (modern cards without HP text)
 	explicitHPPatterns := []*regexp.Regexp{
-		regexp.MustCompile(`(?i)HP[ ]*(\d{2,3})`),    // "HP 170", "HP170"
-		regexp.MustCompile(`(?i)(\d{2,3})[ ]*HP`),    // "170 HP", "170HP"
+		regexp.MustCompile(`(?i)HP[ ]*(\d{2,3})`), // "HP 170", "HP170"
+		regexp.MustCompile(`(?i)(\d{2,3})[ ]*HP`), // "170 HP", "170HP"
 		// Note: Removed [HhWw][ ]+(\d{2,3}) as it caused false positives with attack names like "Gnaw 10"
-		regexp.MustCompile(`(?i)4P[ ]*(\d{2,3})`),    // "4P 60" (OCR error for HP)
+		regexp.MustCompile(`(?i)4P[ ]*(\d{2,3})`), // "4P 60" (OCR error for HP)
 	}
 
 	fallbackHPPatterns := []*regexp.Regexp{
-		regexp.MustCompile(`[A-Z](\d{2,3})\s*[&@©]`),     // "D170 @" pattern
-		regexp.MustCompile(`[~.,]?(\d{3})\s*[&@©®)>]`),   // Modern card: "~310@", "220©", ".330)"
-		regexp.MustCompile(`(?i)VMAX[^0-9]*(\d{3})`),     // VMAX cards: number near VMAX text
+		regexp.MustCompile(`[A-Z](\d{2,3})\s*[&@©]`),        // "D170 @" pattern
+		regexp.MustCompile(`[~.,]?(\d{3})\s*[&@©®)>]`),      // Modern card: "~310@", "220©", ".330)"
+		regexp.MustCompile(`(?i)VMAX[^0-9]*(\d{3})`),        // VMAX cards: number near VMAX text
 		regexp.MustCompile(`(?i)ex[^0-9]*(\d{2,3})\s*[©®]`), // ex cards: "ex...220©"
 	}
 

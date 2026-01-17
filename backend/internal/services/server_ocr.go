@@ -113,10 +113,10 @@ func (s *ServerOCRService) ProcessImageBytes(imageData []byte) (*ServerOCRResult
 	// Define regions of interest for trading cards
 	// Trading cards have standard layouts - we extract text from specific regions
 	regions := []struct {
-		name                           string
-		x1Pct, y1Pct, x2Pct, y2Pct     float64 // Percentages of image dimensions
-		psm                            string  // Tesseract page segmentation mode
-		priority                       int     // Higher = more important for card identification
+		name                       string
+		x1Pct, y1Pct, x2Pct, y2Pct float64 // Percentages of image dimensions
+		psm                        string  // Tesseract page segmentation mode
+		priority                   int     // Higher = more important for card identification
 	}{
 		// Top region: Card name and HP (Pokemon) or name/mana (MTG)
 		{"top_header", 0.05, 0.02, 0.95, 0.12, "7", 10},
@@ -437,7 +437,7 @@ func enhanceContrast(gray *image.Gray) *image.Gray {
 // encodeImagePNG encodes an image as PNG bytes
 func encodeImagePNG(img image.Image) []byte {
 	var buf bytes.Buffer
-	png.Encode(&buf, img)
+	_ = png.Encode(&buf, img) // Error ignored: encoding in-memory image shouldn't fail
 	return buf.Bytes()
 }
 
@@ -528,46 +528,46 @@ func correctOCRErrors(text string) string {
 	// Common OCR error corrections
 	corrections := map[string]string{
 		// Illustrator misspellings
-		"lllus":     "Illus",
-		"llus":      "Illus",
-		"1llus":     "Illus",
-		"|llus":     "Illus",
+		"lllus": "Illus",
+		"llus":  "Illus",
+		"1llus": "Illus",
+		"|llus": "Illus",
 		// Company names
 		"Wisards":   "Wizards",
 		"Wizarcls":  "Wizards",
 		"Nintenclo": "Nintendo",
 		// Pokemon misspellings
-		"Pokérnon":  "Pokémon",
-		"Pokermon":  "Pokémon",
-		"Pokernon":  "Pokémon",
-		"Pokéman":   "Pokémon",
+		"Pokérnon": "Pokémon",
+		"Pokermon": "Pokémon",
+		"Pokernon": "Pokémon",
+		"Pokéman":  "Pokémon",
 		// HP misreads (common on dark cards)
-		" HED ":    " HP ",
-		" HEP ":    " HP ",
-		" HB ":     " HP ",
-		" H P ":    " HP ",
-		"HED ":     "HP ",
-		"HEP ":     "HP ",
-		" HED":     " HP",
-		" HEP":     " HP",
+		" HED ": " HP ",
+		" HEP ": " HP ",
+		" HB ":  " HP ",
+		" H P ": " HP ",
+		"HED ":  "HP ",
+		"HEP ":  "HP ",
+		" HED":  " HP",
+		" HEP":  " HP",
 		// Number corrections - l/1 and O/0 confusion
-		" l ":      " 1 ",
-		" O ":      " 0 ",
-		"l/":       "1/",
-		"/l":       "/1",
-		"O/":       "0/",
-		"/O":       "/0",
+		" l ": " 1 ",
+		" O ": " 0 ",
+		"l/":  "1/",
+		"/l":  "/1",
+		"O/":  "0/",
+		"/O":  "/0",
 		// Modern card HP patterns: "~3l0@" → "~310@", "2l0" → "210"
-		"0l0":      "010",
-		"1l0":      "110",
-		"2l0":      "210",
-		"3l0":      "310",
-		"4l0":      "410",
+		"0l0": "010",
+		"1l0": "110",
+		"2l0": "210",
+		"3l0": "310",
+		"4l0": "410",
 		// Also O → 0 in number contexts
-		"0O0":      "000",
-		"1O0":      "100",
-		"2O0":      "200",
-		"3O0":      "300",
+		"0O0": "000",
+		"1O0": "100",
+		"2O0": "200",
+		"3O0": "300",
 	}
 
 	result := text
