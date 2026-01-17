@@ -51,3 +51,6 @@ temp/
 # Pokemon TCG data (downloaded automatically)
 backend/data/pokemon-tcg-data-master/
 backend/data/pokemon-tcg-data.zip
+
+# Test images (downloaded during testing)
+backend/internal/services/testdata/images/

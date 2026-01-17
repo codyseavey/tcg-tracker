@@ -5,8 +5,9 @@ import (
 	"encoding/base64"
 	"fmt"
 	"image"
+	"image/color"
 	_ "image/jpeg"
-	_ "image/png"
+	"image/png"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -93,12 +94,19 @@ func (s *ServerOCRService) ProcessImage(imagePath string) (*ServerOCRResult, err
 
 // ProcessImageBytes processes image data directly without saving to file
 func (s *ServerOCRService) ProcessImageBytes(imageData []byte) (*ServerOCRResult, error) {
-	// Verify this is a valid image
-	_, _, err := image.Decode(bytes.NewReader(imageData))
+	// Decode the image
+	img, _, err := image.Decode(bytes.NewReader(imageData))
 	if err != nil {
 		return &ServerOCRResult{
 			Error: fmt.Sprintf("invalid image data: %v", err),
 		}, err
+	}
+
+	// Preprocess the image for better OCR results
+	processedData, err := preprocessImageForOCR(img)
+	if err != nil {
+		// Fall back to original image if preprocessing fails
+		processedData = imageData
 	}
 
 	// Try multiple OCR configurations and pick the best result
@@ -114,40 +122,53 @@ func (s *ServerOCRService) ProcessImageBytes(imageData []byte) (*ServerOCRResult
 	var bestResult *ServerOCRResult
 	bestScore := 0.0
 
-	for _, cfg := range configs {
-		cmd := exec.Command(
-			s.tesseractPath,
-			"stdin",
-			"stdout",
-			"-l", s.language,
-			"--psm", cfg.psm,
-			"--oem", "3",
-		)
+	// Try with preprocessed image first
+	imagesToTry := [][]byte{processedData}
+	if !bytes.Equal(processedData, imageData) {
+		// Also try original image if preprocessing changed it
+		imagesToTry = append(imagesToTry, imageData)
+	}
 
-		cmd.Stdin = bytes.NewReader(imageData)
+	for _, imgData := range imagesToTry {
+		for _, cfg := range configs {
+			cmd := exec.Command(
+				s.tesseractPath,
+				"stdin",
+				"stdout",
+				"-l", s.language,
+				"--psm", cfg.psm,
+				"--oem", "3",
+			)
 
-		var stdout, stderr bytes.Buffer
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
+			cmd.Stdin = bytes.NewReader(imgData)
 
-		err = cmd.Run()
-		if err != nil {
-			continue // Try next configuration
-		}
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
 
-		text := stdout.String()
-		lines := splitAndCleanLines(text)
-		confidence := estimateConfidence(lines)
+			err = cmd.Run()
+			if err != nil {
+				continue // Try next configuration
+			}
 
-		// Score includes confidence and line count (more lines = more info extracted)
-		score := confidence + float64(len(lines))*0.05
+			text := stdout.String()
+			lines := splitAndCleanLines(text)
+			confidence := estimateConfidence(lines)
 
-		if bestResult == nil || score > bestScore {
-			bestScore = score
-			bestResult = &ServerOCRResult{
-				Text:       text,
-				Lines:      lines,
-				Confidence: confidence,
+			// Score includes confidence and line count (more lines = more info extracted)
+			// Also bonus for finding card-like patterns
+			score := confidence + float64(len(lines))*0.05
+			if hasCardPatterns(lines) {
+				score += 0.3
+			}
+
+			if bestResult == nil || score > bestScore {
+				bestScore = score
+				bestResult = &ServerOCRResult{
+					Text:       text,
+					Lines:      lines,
+					Confidence: confidence,
+				}
 			}
 		}
 	}
@@ -159,6 +180,108 @@ func (s *ServerOCRService) ProcessImageBytes(imageData []byte) (*ServerOCRResult
 	}
 
 	return bestResult, nil
+}
+
+// preprocessImageForOCR applies image preprocessing to improve OCR quality
+// - Converts to grayscale
+// - Enhances contrast
+// - Returns PNG-encoded bytes
+func preprocessImageForOCR(img image.Image) ([]byte, error) {
+	bounds := img.Bounds()
+	width, height := bounds.Dx(), bounds.Dy()
+
+	// Create grayscale image with enhanced contrast
+	gray := image.NewGray(bounds)
+
+	// Convert to grayscale and collect histogram
+	histogram := make([]int, 256)
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			r, g, b, _ := img.At(x, y).RGBA()
+			// Use luminosity formula for grayscale conversion
+			lum := uint8((0.299*float64(r) + 0.587*float64(g) + 0.114*float64(b)) / 256)
+			gray.SetGray(x, y, color.Gray{Y: lum})
+			histogram[lum]++
+		}
+	}
+
+	// Find min/max for contrast stretching (ignore bottom/top 1%)
+	total := width * height
+	threshold := total / 100
+	minVal, maxVal := 0, 255
+
+	count := 0
+	for i := 0; i < 256; i++ {
+		count += histogram[i]
+		if count >= threshold {
+			minVal = i
+			break
+		}
+	}
+
+	count = 0
+	for i := 255; i >= 0; i-- {
+		count += histogram[i]
+		if count >= threshold {
+			maxVal = i
+			break
+		}
+	}
+
+	// Apply contrast stretching
+	if maxVal > minVal {
+		scale := 255.0 / float64(maxVal-minVal)
+		for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+			for x := bounds.Min.X; x < bounds.Max.X; x++ {
+				oldVal := gray.GrayAt(x, y).Y
+				newVal := int(float64(int(oldVal)-minVal) * scale)
+				if newVal < 0 {
+					newVal = 0
+				}
+				if newVal > 255 {
+					newVal = 255
+				}
+				gray.SetGray(x, y, color.Gray{Y: uint8(newVal)})
+			}
+		}
+	}
+
+	// Encode as PNG
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, gray); err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
+}
+
+// hasCardPatterns checks if OCR output contains patterns typical of trading cards
+func hasCardPatterns(lines []string) bool {
+	for _, line := range lines {
+		upper := strings.ToUpper(line)
+		// Check for HP pattern (Pokemon)
+		if strings.Contains(upper, "HP") {
+			return true
+		}
+		// Check for card number pattern (XXX/YYY)
+		if strings.Contains(line, "/") {
+			for i, c := range line {
+				if c == '/' && i > 0 && i < len(line)-1 {
+					// Check if there are digits around the slash
+					if line[i-1] >= '0' && line[i-1] <= '9' && line[i+1] >= '0' && line[i+1] <= '9' {
+						return true
+					}
+				}
+			}
+		}
+		// Check for common MTG types
+		if strings.Contains(upper, "CREATURE") || strings.Contains(upper, "INSTANT") ||
+			strings.Contains(upper, "SORCERY") || strings.Contains(upper, "ARTIFACT") ||
+			strings.Contains(upper, "ENCHANTMENT") {
+			return true
+		}
+	}
+	return false
 }
 
 // ProcessBase64Image processes a base64-encoded image

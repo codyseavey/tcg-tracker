@@ -2,8 +2,18 @@ package services
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 )
+
+// parseInt safely parses an integer, returning 0 on failure
+func parseInt(s string) int {
+	val, err := strconv.Atoi(s)
+	if err != nil {
+		return 0
+	}
+	return val
+}
 
 // OCRResult contains parsed information from OCR text
 type OCRResult struct {
@@ -272,11 +282,21 @@ func parsePokemonOCR(result *OCRResult) {
 	}
 
 	// Extract HP: "HP 170" or "170 HP" or just "D170" pattern
-	hpRegex := regexp.MustCompile(`(?:HP\s*(\d+)|(\d{2,3})\s*HP|[A-Z](\d{2,3})\s*[&@])`)
-	if matches := hpRegex.FindStringSubmatch(text); len(matches) >= 2 {
-		for _, m := range matches[1:] {
-			if m != "" {
-				result.HP = m
+	// Also handle OCR variations like "w 130" (H looks like w), "4P 60" (HP with noise)
+	hpPatterns := []*regexp.Regexp{
+		regexp.MustCompile(`(?i)HP\s*(\d{2,3})`),     // "HP 170", "HP170"
+		regexp.MustCompile(`(?i)(\d{2,3})\s*HP`),     // "170 HP", "170HP"
+		regexp.MustCompile(`(?i)[HhWw]\s*(\d{2,3})`), // "w 130" (OCR error for HP)
+		regexp.MustCompile(`(?i)4P\s*(\d{2,3})`),     // "4P 60" (OCR error for HP)
+		regexp.MustCompile(`[A-Z](\d{2,3})\s*[&@©]`), // "D170 @" pattern
+	}
+
+	for _, hpRegex := range hpPatterns {
+		if matches := hpRegex.FindStringSubmatch(text); len(matches) >= 2 {
+			hp := matches[1]
+			// Validate HP is in reasonable range (10-340 for Pokemon)
+			if hpVal := parseInt(hp); hpVal >= 10 && hpVal <= 400 {
+				result.HP = hp
 				break
 			}
 		}
@@ -393,6 +413,8 @@ func extractPokemonCardName(lines []string, detectedRarity string) string {
 		"basic", "stage", "pokemon", "trainer", "energy",
 		"once during", "when you", "attack", "weakness",
 		"resistance", "retreat", "illus", "©", "nintendo",
+		"evolves from", "rule", "prize", "knocked out",
+		"discard", "damage", "opponent", "your turn",
 	}
 
 	// Also skip rarity-related words that might appear as separate lines
@@ -400,6 +422,32 @@ func extractPokemonCardName(lines []string, detectedRarity string) string {
 		"holo", "rare", "uncommon", "common", "promo",
 		"gold", "rainbow", "secret", "full art", "reverse",
 		"illustration", "special art", "ultra", "hyper", "double",
+	}
+
+	// Known Pokemon names that might appear with OCR noise
+	knownPokemonNames := []string{
+		"pikachu", "charizard", "mewtwo", "mew", "blastoise", "venusaur",
+		"umbreon", "espeon", "eevee", "gengar", "dragonite", "gyarados",
+		"rayquaza", "arceus", "giratina", "dialga", "palkia", "lugia",
+		"ho-oh", "celebi", "jirachi", "deoxys", "darkrai", "shaymin",
+		"snorlax", "machamp", "alakazam", "golem", "arcanine", "lapras",
+	}
+
+	// First pass: look for known Pokemon names in the text
+	fullText := strings.ToLower(strings.Join(lines, " "))
+	for _, pokeName := range knownPokemonNames {
+		if strings.Contains(fullText, pokeName) {
+			// Find the line containing this Pokemon name and extract it cleanly
+			for _, line := range lines {
+				if strings.Contains(strings.ToLower(line), pokeName) {
+					// Clean up the line to extract just the name part
+					name := cleanPokemonName(line, pokeName)
+					if name != "" {
+						return name
+					}
+				}
+			}
+		}
 	}
 
 	for _, line := range lines {
@@ -449,10 +497,7 @@ func extractPokemonCardName(lines []string, detectedRarity string) string {
 
 		// This might be the card name
 		// Clean it up - remove HP values, etc.
-		name := regexp.MustCompile(`\s*HP\s*\d+`).ReplaceAllString(line, "")
-		name = regexp.MustCompile(`\s*\d{2,3}\s*HP`).ReplaceAllString(name, "")
-		name = strings.TrimSpace(name)
-
+		name := cleanPokemonName(line, "")
 		if len(name) >= 3 {
 			return name
 		}
@@ -461,11 +506,52 @@ func extractPokemonCardName(lines []string, detectedRarity string) string {
 	// Fallback: return first line with letters
 	for _, line := range lines {
 		if regexp.MustCompile(`[a-zA-Z]{3,}`).MatchString(line) {
-			return strings.TrimSpace(line)
+			return cleanPokemonName(line, "")
 		}
 	}
 
 	return ""
+}
+
+// cleanPokemonName cleans up OCR noise from a Pokemon name
+func cleanPokemonName(line, knownName string) string {
+	// Remove HP values
+	name := regexp.MustCompile(`\s*HP\s*\d+`).ReplaceAllString(line, "")
+	name = regexp.MustCompile(`\s*\d{2,3}\s*HP`).ReplaceAllString(name, "")
+
+	// Remove common OCR artifacts at the start (numbers, symbols)
+	name = regexp.MustCompile(`^[^a-zA-Z]*`).ReplaceAllString(name, "")
+
+	// If we know the Pokemon name, try to extract it with its suffixes (V, VMAX, ex, etc.)
+	if knownName != "" {
+		// Build a pattern to match the known name with optional suffix
+		// Note: Order matters - check longer suffixes first (VMAX before V)
+		pattern := regexp.MustCompile(`(?i)(` + regexp.QuoteMeta(knownName) + `)\s*(VMAX|VSTAR|MEGA|PRIME|GX|EX|ex|V)?`)
+		if match := pattern.FindStringSubmatch(name); len(match) >= 2 {
+			result := match[1]
+			if len(match) >= 3 && match[2] != "" {
+				suffix := match[2]
+				// Preserve lowercase for "ex" (modern ex cards), uppercase for others
+				if strings.ToLower(suffix) == "ex" {
+					result += " ex"
+				} else {
+					result += " " + strings.ToUpper(suffix)
+				}
+			}
+			// Capitalize first letter of Pokemon name
+			if len(result) > 0 {
+				result = strings.ToUpper(string(result[0])) + result[1:]
+			}
+			return result
+		}
+	}
+
+	// Clean up remaining artifacts
+	name = regexp.MustCompile(`[^a-zA-Z0-9\s'-]`).ReplaceAllString(name, "")
+	name = regexp.MustCompile(`\s+`).ReplaceAllString(name, " ")
+	name = strings.TrimSpace(name)
+
+	return name
 }
 
 func parseMTGOCR(result *OCRResult) {
