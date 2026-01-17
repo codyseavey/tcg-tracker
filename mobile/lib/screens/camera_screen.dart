@@ -83,9 +83,9 @@ class _CameraScreenState extends State<CameraScreen> {
     _cameras = await _cameraService.getAvailableCameras();
     if (_cameras == null || _cameras!.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No camera available')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('No camera available')));
       }
       return;
     }
@@ -111,7 +111,9 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 
   Future<void> _captureAndProcess() async {
-    if (_controller == null || !_controller!.value.isInitialized || _isProcessing) {
+    if (_controller == null ||
+        !_controller!.value.isInitialized ||
+        _isProcessing) {
       return;
     }
 
@@ -121,29 +123,11 @@ class _CameraScreenState extends State<CameraScreen> {
       final image = await _controller!.takePicture();
       final imageBytes = await File(image.path).readAsBytes();
 
-      // Try client-side OCR first
       ScanResult? scanResult;
       bool usedServerOCR = false;
 
-      try {
-        final ocrResult = await _ocrService.processImage(image.path);
-
-        if (ocrResult.textLines.isNotEmpty) {
-          // Send full OCR text to server for parsing
-          final fullText = ocrResult.textLines.join('\n');
-
-          scanResult = await _apiService.identifyCard(
-            fullText,
-            _selectedGame,
-            imageAnalysis: ocrResult.imageAnalysis,
-          );
-        }
-      } on OcrException {
-        // Client OCR failed, will try server OCR
-      }
-
-      // If client OCR failed or returned no cards, try server-side OCR
-      if ((scanResult == null || scanResult.cards.isEmpty) && _serverOCRAvailable == true) {
+      // Prefer server-side OCR when available (better parsing and accuracy)
+      if (_serverOCRAvailable == true) {
         try {
           scanResult = await _apiService.identifyCardFromImage(
             imageBytes.toList(),
@@ -151,7 +135,28 @@ class _CameraScreenState extends State<CameraScreen> {
           );
           usedServerOCR = true;
         } catch (e) {
-          // Server OCR also failed
+          // Server OCR failed, will try client-side OCR as fallback
+        }
+      }
+
+      // Fall back to client-side OCR if server OCR unavailable or failed
+      if (scanResult == null || scanResult.cards.isEmpty) {
+        try {
+          final ocrResult = await _ocrService.processImage(image.path);
+
+          if (ocrResult.textLines.isNotEmpty) {
+            // Send full OCR text to server for parsing
+            final fullText = ocrResult.textLines.join('\n');
+
+            scanResult = await _apiService.identifyCard(
+              fullText,
+              _selectedGame,
+              imageAnalysis: ocrResult.imageAnalysis,
+            );
+            usedServerOCR = false;
+          }
+        } on OcrException {
+          // Client OCR also failed
           if (scanResult == null) {
             rethrow;
           }
@@ -164,9 +169,9 @@ class _CameraScreenState extends State<CameraScreen> {
       if (!mounted) return;
 
       if (scanResult == null || scanResult.cards.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No cards found')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('No cards found')));
         return;
       }
 
@@ -177,7 +182,9 @@ class _CameraScreenState extends State<CameraScreen> {
         MaterialPageRoute(
           builder: (context) => ScanResultScreen(
             cards: result.cards,
-            searchQuery: usedServerOCR ? 'Scanned Card (Server OCR)' : 'Scanned Card',
+            searchQuery: usedServerOCR
+                ? 'Scanned Card (Server OCR)'
+                : 'Scanned Card',
             scanMetadata: result.metadata,
           ),
         ),
@@ -189,16 +196,18 @@ class _CameraScreenState extends State<CameraScreen> {
         final errorStr = e.toString();
         if (errorStr.contains('timed out')) {
           message = 'Request timed out. Check your connection.';
-        } else if (errorStr.contains('SocketException') || errorStr.contains('Connection')) {
+        } else if (errorStr.contains('SocketException') ||
+            errorStr.contains('Connection')) {
           message = 'Cannot connect to server. Check your network.';
         } else if (errorStr.contains('No text detected')) {
-          message = 'No text detected in image. Try again with better lighting.';
+          message =
+              'No text detected in image. Try again with better lighting.';
         } else {
           message = 'Error: ${e.toString().replaceAll('Exception: ', '')}';
         }
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(message)),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(message)));
       }
     } finally {
       if (mounted) {

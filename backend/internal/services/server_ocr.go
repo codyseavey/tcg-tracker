@@ -101,37 +101,64 @@ func (s *ServerOCRService) ProcessImageBytes(imageData []byte) (*ServerOCRResult
 		}, err
 	}
 
-	// Write to stdin using process substitution
-	cmd := exec.Command(
-		s.tesseractPath,
-		"stdin", // Read from stdin
-		"stdout",
-		"-l", s.language,
-		"--psm", "3",
-		"--oem", "3",
-	)
-
-	cmd.Stdin = bytes.NewReader(imageData)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	err = cmd.Run()
-	if err != nil {
-		return &ServerOCRResult{
-			Error: fmt.Sprintf("tesseract error: %v - %s", err, stderr.String()),
-		}, err
+	// Try multiple OCR configurations and pick the best result
+	configs := []struct {
+		psm  string
+		desc string
+	}{
+		{"6", "single block"}, // PSM 6: Assume single uniform block of text
+		{"3", "automatic"},    // PSM 3: Fully automatic page segmentation
+		{"11", "sparse text"}, // PSM 11: Sparse text without OSD
 	}
 
-	text := stdout.String()
-	lines := splitAndCleanLines(text)
+	var bestResult *ServerOCRResult
+	bestScore := 0.0
 
-	return &ServerOCRResult{
-		Text:       text,
-		Lines:      lines,
-		Confidence: estimateConfidence(lines),
-	}, nil
+	for _, cfg := range configs {
+		cmd := exec.Command(
+			s.tesseractPath,
+			"stdin",
+			"stdout",
+			"-l", s.language,
+			"--psm", cfg.psm,
+			"--oem", "3",
+		)
+
+		cmd.Stdin = bytes.NewReader(imageData)
+
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+
+		err = cmd.Run()
+		if err != nil {
+			continue // Try next configuration
+		}
+
+		text := stdout.String()
+		lines := splitAndCleanLines(text)
+		confidence := estimateConfidence(lines)
+
+		// Score includes confidence and line count (more lines = more info extracted)
+		score := confidence + float64(len(lines))*0.05
+
+		if bestResult == nil || score > bestScore {
+			bestScore = score
+			bestResult = &ServerOCRResult{
+				Text:       text,
+				Lines:      lines,
+				Confidence: confidence,
+			}
+		}
+	}
+
+	if bestResult == nil {
+		return &ServerOCRResult{
+			Error: "all OCR configurations failed",
+		}, fmt.Errorf("all OCR configurations failed")
+	}
+
+	return bestResult, nil
 }
 
 // ProcessBase64Image processes a base64-encoded image
