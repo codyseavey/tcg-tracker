@@ -1,5 +1,5 @@
 name: mobile
-description: "A new Flutter project."
+description: "TCG Tracker - Trading Card Game Collection Manager"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -55,6 +55,17 @@ dev_dependencies:
   flutter_lints: ^6.0.0
   mocktail: ^1.0.4              # Mocking (no codegen needed)
   network_image_mock: ^2.1.1    # Mock Image.network in widgets
+  flutter_launcher_icons: ^0.14.3  # Generate app icons
+
+# App icon configuration
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon/app_icon.png"
+  adaptive_icon_background: "#1a1a2e"  # Dark background for adaptive icon
+  adaptive_icon_foreground: "assets/icon/app_icon.png"
+  min_sdk_android: 21
+  remove_alpha_ios: true  # iOS doesn't support transparent icons
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
