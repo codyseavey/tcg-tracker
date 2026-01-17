@@ -15,9 +15,10 @@ const (
 	// reservedManualQuota is the number of requests reserved for manual refreshes
 	reservedManualQuota = 10
 	// defaultBatchSize is the number of cards to update per batch (with 100/day limit, ~4 per hour is safe)
-	defaultBatchSize = 4
-	// apiRequestDelay is the delay between API requests to be nice to the API
-	apiRequestDelay = 500 * time.Millisecond
+	defaultBatchSize = 2
+	// apiRequestDelay is the delay between API requests to respect rate limits
+	// Free tier has strict burst limits, so we use a longer delay
+	apiRequestDelay = 10 * time.Second
 )
 
 type PriceWorker struct {
