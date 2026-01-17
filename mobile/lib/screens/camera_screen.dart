@@ -167,7 +167,7 @@ class _CameraScreenState extends State<CameraScreen> {
         }
       }
 
-      // Clean up temp image
+      // Clean up temp image file
       await File(image.path).delete();
 
       if (!mounted) return;
@@ -190,6 +190,7 @@ class _CameraScreenState extends State<CameraScreen> {
                 ? 'Scanned Card (Server OCR)'
                 : 'Scanned Card',
             scanMetadata: result.metadata,
+            scannedImageBytes: imageBytes.toList(),
           ),
         ),
       );

@@ -10,6 +10,7 @@ class CollectionItem {
   final bool firstEdition;
   final String? notes;
   final DateTime addedAt;
+  final String? scannedImagePath;
 
   CollectionItem({
     required this.id,
@@ -21,6 +22,7 @@ class CollectionItem {
     this.firstEdition = false,
     this.notes,
     required this.addedAt,
+    this.scannedImagePath,
   });
 
   factory CollectionItem.fromJson(Map<String, dynamic> json) {
@@ -36,6 +38,7 @@ class CollectionItem {
       addedAt: json['added_at'] != null
           ? DateTime.parse(json['added_at'])
           : DateTime.now(),
+      scannedImagePath: json['scanned_image_path'],
     );
   }
 
@@ -70,6 +73,7 @@ class CollectionItem {
     bool? firstEdition,
     String? notes,
     DateTime? addedAt,
+    String? scannedImagePath,
   }) {
     return CollectionItem(
       id: id ?? this.id,
@@ -81,6 +85,7 @@ class CollectionItem {
       firstEdition: firstEdition ?? this.firstEdition,
       notes: notes ?? this.notes,
       addedAt: addedAt ?? this.addedAt,
+      scannedImagePath: scannedImagePath ?? this.scannedImagePath,
     );
   }
 }

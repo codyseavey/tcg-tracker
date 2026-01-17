@@ -20,7 +20,7 @@ const emit = defineEmits(['select'])
     <div
       v-for="(item, index) in cards"
       :key="item.id || item.card?.id || `card-${index}`"
-      class="bg-white rounded-lg shadow-md overflow-hidden cursor-pointer hover:shadow-lg transition-shadow"
+      class="bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden cursor-pointer hover:shadow-lg transition-shadow"
       @click="emit('select', item)"
     >
       <div class="relative">
@@ -51,22 +51,22 @@ const emit = defineEmits(['select'])
         </div>
       </div>
       <div class="p-3">
-        <h3 class="font-semibold text-sm truncate text-gray-800">
+        <h3 class="font-semibold text-sm truncate text-gray-800 dark:text-white">
           {{ item.card?.name || item.name }}
         </h3>
-        <p class="text-xs text-gray-500 truncate">
+        <p class="text-xs text-gray-500 dark:text-gray-400 truncate">
           {{ item.card?.set_name || item.set_name }}
         </p>
         <div class="mt-2 flex justify-between items-center">
-          <span class="text-sm font-medium" :class="isPriceStale(item) ? 'text-orange-500' : 'text-green-600'">
+          <span class="text-sm font-medium" :class="isPriceStale(item) ? 'text-orange-500' : 'text-green-600 dark:text-green-400'">
             {{ showQuantity ? formatPrice(getItemValue(item)) : formatPrice(item.card?.price_usd || item.price_usd) }}
             <span v-if="isPriceStale(item)" class="text-xs">*</span>
           </span>
           <span
             class="text-xs px-2 py-0.5 rounded"
             :class="{
-              'bg-purple-100 text-purple-800': (item.card?.game || item.game) === 'mtg',
-              'bg-yellow-100 text-yellow-800': (item.card?.game || item.game) === 'pokemon'
+              'bg-purple-100 dark:bg-purple-900 text-purple-800 dark:text-purple-200': (item.card?.game || item.game) === 'mtg',
+              'bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200': (item.card?.game || item.game) === 'pokemon'
             }"
           >
             {{ (item.card?.game || item.game) === 'mtg' ? 'MTG' : 'Pokemon' }}

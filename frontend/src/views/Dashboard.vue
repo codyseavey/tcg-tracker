@@ -49,14 +49,14 @@ onMounted(async () => {
 <template>
   <div class="space-y-8">
     <div>
-      <h1 class="text-3xl font-bold text-gray-800 mb-6">Dashboard</h1>
+      <h1 class="text-3xl font-bold text-gray-800 dark:text-white mb-6">Dashboard</h1>
       <StatsPanel v-if="store.stats" :stats="store.stats" />
 
-      <div v-if="priceStatus" class="mt-4 bg-white rounded-lg shadow p-4">
-        <h3 class="text-sm font-medium text-gray-700 mb-2">Pokemon Price API Quota</h3>
+      <div v-if="priceStatus" class="mt-4 bg-white dark:bg-gray-800 rounded-lg shadow p-4">
+        <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Pokemon Price API Quota</h3>
         <div class="flex items-center gap-4">
           <div class="flex-1">
-            <div class="h-2 bg-gray-200 rounded-full overflow-hidden">
+            <div class="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
               <div
                 :class="quotaColor"
                 :style="{ width: quotaPercentage + '%' }"
@@ -64,11 +64,11 @@ onMounted(async () => {
               ></div>
             </div>
           </div>
-          <div class="text-sm text-gray-600">
+          <div class="text-sm text-gray-600 dark:text-gray-400">
             {{ priceStatus.remaining }} / {{ priceStatus.daily_limit }} remaining
           </div>
         </div>
-        <p class="text-xs text-gray-500 mt-1">
+        <p class="text-xs text-gray-500 dark:text-gray-500 mt-1">
           Resets at {{ formatResetTime(priceStatus.resets_at) }}
         </p>
       </div>
@@ -76,8 +76,8 @@ onMounted(async () => {
 
     <div>
       <div class="flex justify-between items-center mb-4">
-        <h2 class="text-xl font-semibold text-gray-800">Recent Additions</h2>
-        <router-link to="/collection" class="text-blue-600 hover:text-blue-800">
+        <h2 class="text-xl font-semibold text-gray-800 dark:text-white">Recent Additions</h2>
+        <router-link to="/collection" class="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300">
           View All &rarr;
         </router-link>
       </div>
@@ -86,8 +86,8 @@ onMounted(async () => {
         <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
       </div>
 
-      <div v-else-if="recentCards.length === 0" class="text-center py-12 bg-white rounded-lg">
-        <p class="text-gray-500 mb-4">Your collection is empty</p>
+      <div v-else-if="recentCards.length === 0" class="text-center py-12 bg-white dark:bg-gray-800 rounded-lg">
+        <p class="text-gray-500 dark:text-gray-400 mb-4">Your collection is empty</p>
         <router-link
           to="/add"
           class="inline-block bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700"

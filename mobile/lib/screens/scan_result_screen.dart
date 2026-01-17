@@ -8,6 +8,7 @@ class ScanResultScreen extends StatefulWidget {
   final String searchQuery;
   final ScanMetadata? scanMetadata;
   final ApiService? apiService;
+  final List<int>? scannedImageBytes;
 
   const ScanResultScreen({
     super.key,
@@ -15,6 +16,7 @@ class ScanResultScreen extends StatefulWidget {
     required this.searchQuery,
     this.scanMetadata,
     this.apiService,
+    this.scannedImageBytes,
   });
 
   @override
@@ -57,6 +59,7 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
         condition: _condition,
         foil: _foil,
         firstEdition: _firstEdition,
+        scannedImageBytes: widget.scannedImageBytes,
       );
 
       if (!mounted) return;

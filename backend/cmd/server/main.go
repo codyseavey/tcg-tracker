@@ -65,6 +65,9 @@ func main() {
 	}
 	priceWorker := services.NewPriceWorker(priceService, pokemonService, dailyLimit)
 
+	// Initialize image storage service
+	imageStorageService := services.NewImageStorageService()
+
 	// Create a cancellable context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -73,7 +76,7 @@ func main() {
 	go priceWorker.Start(ctx)
 
 	// Setup router
-	router := api.SetupRouter(scryfallService, pokemonService, priceWorker, priceService)
+	router := api.SetupRouter(scryfallService, pokemonService, priceWorker, priceService, imageStorageService)
 
 	// Get port from environment
 	port := os.Getenv("PORT")

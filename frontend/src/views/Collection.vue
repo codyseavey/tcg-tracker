@@ -73,12 +73,12 @@ onMounted(() => {
 <template>
   <div>
     <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
-      <h1 class="text-3xl font-bold text-gray-800">My Collection</h1>
+      <h1 class="text-3xl font-bold text-gray-800 dark:text-white">My Collection</h1>
 
       <div class="flex flex-wrap gap-3">
         <select
           v-model="filterGame"
-          class="border rounded-lg px-3 py-2 bg-white"
+          class="border dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
         >
           <option value="all">All Games</option>
           <option value="mtg">Magic: The Gathering</option>
@@ -87,7 +87,7 @@ onMounted(() => {
 
         <select
           v-model="sortBy"
-          class="border rounded-lg px-3 py-2 bg-white"
+          class="border dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
         >
           <option value="added_at">Recently Added</option>
           <option value="name">Name</option>
@@ -107,8 +107,8 @@ onMounted(() => {
       <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
     </div>
 
-    <div v-else-if="filteredItems.length === 0" class="text-center py-12 bg-white rounded-lg">
-      <p class="text-gray-500 mb-4">No cards found</p>
+    <div v-else-if="filteredItems.length === 0" class="text-center py-12 bg-white dark:bg-gray-800 rounded-lg">
+      <p class="text-gray-500 dark:text-gray-400 mb-4">No cards found</p>
       <router-link
         to="/add"
         class="inline-block bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700"

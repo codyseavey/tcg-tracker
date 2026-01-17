@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/base64"
 	"net/http"
 	"strconv"
 	"time"
@@ -13,14 +14,16 @@ import (
 )
 
 type CollectionHandler struct {
-	scryfallService *services.ScryfallService
-	pokemonService  *services.PokemonHybridService
+	scryfallService     *services.ScryfallService
+	pokemonService      *services.PokemonHybridService
+	imageStorageService *services.ImageStorageService
 }
 
-func NewCollectionHandler(scryfall *services.ScryfallService, pokemon *services.PokemonHybridService) *CollectionHandler {
+func NewCollectionHandler(scryfall *services.ScryfallService, pokemon *services.PokemonHybridService, imageStorage *services.ImageStorageService) *CollectionHandler {
 	return &CollectionHandler{
-		scryfallService: scryfall,
-		pokemonService:  pokemon,
+		scryfallService:     scryfall,
+		pokemonService:      pokemon,
+		imageStorageService: imageStorage,
 	}
 }
 
@@ -99,15 +102,33 @@ func (h *CollectionHandler) AddToCollection(c *gin.Context) {
 		return
 	}
 
+	// Handle scanned image if provided
+	var scannedImagePath string
+	if req.ScannedImageData != "" && h.imageStorageService != nil {
+		imageData, err := base64.StdEncoding.DecodeString(req.ScannedImageData)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid image data"})
+			return
+		}
+		filename, err := h.imageStorageService.SaveImage(imageData)
+		if err != nil {
+			// Log but don't fail - image is optional
+			scannedImagePath = ""
+		} else {
+			scannedImagePath = filename
+		}
+	}
+
 	// Create new collection item
 	item := models.CollectionItem{
-		CardID:       req.CardID,
-		Quantity:     quantity,
-		Condition:    condition,
-		Foil:         req.Foil,
-		FirstEdition: req.FirstEdition,
-		Notes:        req.Notes,
-		AddedAt:      time.Now(),
+		CardID:           req.CardID,
+		Quantity:         quantity,
+		Condition:        condition,
+		Foil:             req.Foil,
+		FirstEdition:     req.FirstEdition,
+		Notes:            req.Notes,
+		AddedAt:          time.Now(),
+		ScannedImagePath: scannedImagePath,
 	}
 
 	if err := db.Create(&item).Error; err != nil {

@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'providers/collection_provider.dart';
+import 'providers/theme_provider.dart';
 import 'screens/camera_screen.dart';
 import 'screens/collection_screen.dart';
 import 'screens/search_screen.dart';
 import 'screens/dashboard_screen.dart';
 import 'screens/settings_screen.dart';
+import 'theme/app_theme.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -17,17 +19,23 @@ class TCGTrackerApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => CollectionProvider()..initialize(),
-      child: MaterialApp(
-        title: 'TCG Tracker',
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),
-          useMaterial3: true,
-        ),
-        home: const MainNavigationScreen(),
-        routes: {
-          '/settings': (context) => const SettingsScreen(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider(create: (_) => CollectionProvider()..initialize()),
+      ],
+      child: Consumer<ThemeProvider>(
+        builder: (context, themeProvider, child) {
+          return MaterialApp(
+            title: 'TCG Tracker',
+            theme: lightTheme,
+            darkTheme: darkTheme,
+            themeMode: themeProvider.themeMode,
+            home: const MainNavigationScreen(),
+            routes: {
+              '/settings': (context) => const SettingsScreen(),
+            },
+          );
         },
       ),
     );

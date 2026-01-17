@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../models/card.dart';
 import '../models/collection_item.dart';
 import '../providers/collection_provider.dart';
+import '../services/api_service.dart';
 import '../utils/constants.dart';
 
 class CardDetailScreen extends StatefulWidget {
@@ -28,9 +29,11 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
   late bool _firstEdition;
   bool _loading = false;
   bool _priceRefreshing = false;
+  bool _showScannedImage = false;
 
   CardModel get _card => widget.collectionItem?.card ?? widget.card!;
   bool get _isCollectionItem => widget.collectionItem != null;
+  bool get _hasScannedImage => widget.collectionItem?.scannedImagePath != null;
 
   // Use unified condition codes from constants
   List<String> get _conditions => CardConditions.codes;
@@ -117,37 +120,94 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
   Widget _buildCardImage(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
 
-    return AspectRatio(
-      aspectRatio: 2.5 / 3.5,
-      child: Card(
-        clipBehavior: Clip.antiAlias,
-        elevation: 4,
-        child: _card.imageUrl != null && _card.imageUrl!.isNotEmpty
-            ? CachedNetworkImage(
-                imageUrl: _card.imageUrl!,
-                fit: BoxFit.cover,
-                placeholder: (context, url) => Container(
-                  color: colorScheme.surfaceContainerHighest,
-                  child: const Center(child: CircularProgressIndicator()),
-                ),
-                errorWidget: (context, url, error) => Container(
-                  color: colorScheme.surfaceContainerHighest,
-                  child: Icon(
-                    Icons.broken_image_outlined,
-                    size: 64,
-                    color: colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              )
-            : Container(
-                color: colorScheme.surfaceContainerHighest,
-                child: Icon(
-                  Icons.image_not_supported_outlined,
-                  size: 64,
-                  color: colorScheme.onSurfaceVariant,
-                ),
+    return Column(
+      children: [
+        // Image toggle if scanned image exists
+        if (_hasScannedImage) ...[
+          SegmentedButton<bool>(
+            segments: const [
+              ButtonSegment(
+                value: false,
+                label: Text('Official'),
+                icon: Icon(Icons.image_outlined),
               ),
-      ),
+              ButtonSegment(
+                value: true,
+                label: Text('My Scan'),
+                icon: Icon(Icons.camera_alt_outlined),
+              ),
+            ],
+            selected: {_showScannedImage},
+            onSelectionChanged: (selection) {
+              setState(() => _showScannedImage = selection.first);
+            },
+          ),
+          const SizedBox(height: 12),
+        ],
+        // Card image
+        AspectRatio(
+          aspectRatio: 2.5 / 3.5,
+          child: Card(
+            clipBehavior: Clip.antiAlias,
+            elevation: 4,
+            child: _showScannedImage && _hasScannedImage
+                ? FutureBuilder<String>(
+                    future: ApiService().getServerUrl(),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) {
+                        return Container(
+                          color: colorScheme.surfaceContainerHighest,
+                          child: const Center(child: CircularProgressIndicator()),
+                        );
+                      }
+                      final imageUrl =
+                          '${snapshot.data}/images/scanned/${widget.collectionItem!.scannedImagePath}';
+                      return CachedNetworkImage(
+                        imageUrl: imageUrl,
+                        fit: BoxFit.cover,
+                        placeholder: (context, url) => Container(
+                          color: colorScheme.surfaceContainerHighest,
+                          child: const Center(child: CircularProgressIndicator()),
+                        ),
+                        errorWidget: (context, url, error) => Container(
+                          color: colorScheme.surfaceContainerHighest,
+                          child: Icon(
+                            Icons.broken_image_outlined,
+                            size: 64,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      );
+                    },
+                  )
+                : _card.imageUrl != null && _card.imageUrl!.isNotEmpty
+                    ? CachedNetworkImage(
+                        imageUrl: _card.imageUrl!,
+                        fit: BoxFit.cover,
+                        placeholder: (context, url) => Container(
+                          color: colorScheme.surfaceContainerHighest,
+                          child: const Center(child: CircularProgressIndicator()),
+                        ),
+                        errorWidget: (context, url, error) => Container(
+                          color: colorScheme.surfaceContainerHighest,
+                          child: Icon(
+                            Icons.broken_image_outlined,
+                            size: 64,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      )
+                    : Container(
+                        color: colorScheme.surfaceContainerHighest,
+                        child: Icon(
+                          Icons.image_not_supported_outlined,
+                          size: 64,
+                          color: colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+          ),
+        ),
+      ],
     );
   }
 

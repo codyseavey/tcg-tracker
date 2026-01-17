@@ -20,14 +20,14 @@ const handleSearch = () => {
         v-model="query"
         type="text"
         placeholder="Search for cards..."
-        class="w-full border rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+        class="w-full border dark:border-gray-600 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-800 text-gray-900 dark:text-white placeholder-gray-400"
         @keyup.enter="handleSearch"
       />
     </div>
     <div class="flex gap-2">
       <select
         v-model="game"
-        class="border rounded-lg px-4 py-2 bg-white"
+        class="border dark:border-gray-600 rounded-lg px-4 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
       >
         <option value="mtg">Magic: The Gathering</option>
         <option value="pokemon">Pokemon</option>

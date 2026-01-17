@@ -124,20 +124,28 @@ class ApiService {
     String condition = 'NM',
     bool foil = false,
     bool firstEdition = false,
+    List<int>? scannedImageBytes,
   }) async {
     final serverUrl = await getServerUrl();
     final uri = Uri.parse('$serverUrl/api/collection');
 
+    final body = <String, dynamic>{
+      'card_id': cardId,
+      'quantity': quantity,
+      'condition': condition,
+      'foil': foil,
+      'first_edition': firstEdition,
+    };
+
+    // Include scanned image if provided
+    if (scannedImageBytes != null && scannedImageBytes.isNotEmpty) {
+      body['scanned_image_data'] = base64Encode(scannedImageBytes);
+    }
+
     final response = await _httpClient.post(
       uri,
       headers: {'Content-Type': 'application/json'},
-      body: json.encode({
-        'card_id': cardId,
-        'quantity': quantity,
-        'condition': condition,
-        'foil': foil,
-        'first_edition': firstEdition,
-      }),
+      body: json.encode(body),
     ).timeout(
       const Duration(seconds: 35),
       onTimeout: () => throw Exception('Request timed out'),
