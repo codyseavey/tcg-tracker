@@ -201,12 +201,12 @@ func (s *PokemonHybridService) SearchCards(query string) (*models.CardSearchResu
 	}, nil
 }
 
-func (s *PokemonHybridService) enrichWithPrices(cards []models.Card, query string) {
+func (s *PokemonHybridService) enrichWithPrices(cards []models.Card, _ string) {
 	db := database.GetDB()
 	cacheThreshold := 24 * time.Hour // Prices older than this are considered stale
 
-	// First, check database for cached prices
-	needsPriceIDs := []string{}
+	// Only use cached prices - never block search on external API calls
+	// Background price worker will update uncached cards asynchronously
 	for i := range cards {
 		var cachedCard models.Card
 		if err := db.First(&cachedCard, "id = ?", cards[i].ID).Error; err == nil {
@@ -220,54 +220,8 @@ func (s *PokemonHybridService) enrichWithPrices(cards []models.Card, query strin
 				continue
 			}
 		}
-		// Mark as needing price update
+		// Mark as needing price update - background worker will handle it
 		cards[i].PriceSource = "pending"
-		needsPriceIDs = append(needsPriceIDs, cards[i].ID)
-	}
-
-	// If all cards have cached prices, we're done (no API call needed!)
-	if len(needsPriceIDs) == 0 {
-		return
-	}
-
-	// Otherwise, fetch prices from API for cards that need it
-	// Note: This still uses quota, but only for uncached cards
-	// Use short timeout (5s) so searches complete quickly even if price API is slow
-	priceResult, err := s.priceService.SearchCardsWithTimeout(query, 5*time.Second)
-	if err != nil || priceResult == nil {
-		// Price fetch failed or timed out - return cards without prices
-		// The background worker will update prices later
-		return
-	}
-
-	// Create a map of prices by name for matching
-	priceMap := make(map[string]models.Card)
-	for _, priceCard := range priceResult.Cards {
-		key := strings.ToLower(priceCard.Name)
-		priceMap[key] = priceCard
-	}
-
-	// Match prices to cards that need them and save to database
-	for i := range cards {
-		if cards[i].PriceSource == "cached" {
-			continue // Already has cached price
-		}
-
-		key := strings.ToLower(cards[i].Name)
-		if priceCard, ok := priceMap[key]; ok {
-			now := time.Now()
-			cards[i].PriceUSD = priceCard.PriceUSD
-			cards[i].PriceFoilUSD = priceCard.PriceFoilUSD
-			cards[i].PriceUpdatedAt = &now
-			cards[i].PriceSource = "api"
-
-			// Save to database for caching
-			db.Save(&cards[i])
-		} else {
-			// No price found, still save the card for future reference
-			cards[i].PriceSource = "pending"
-			db.Save(&cards[i])
-		}
 	}
 }
 
