@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
@@ -11,15 +12,53 @@ class MockHttpClient extends Mock implements http.Client {}
 
 class FakeUri extends Fake implements Uri {}
 
+// In-memory storage for secure storage mock
+final Map<String, String> _secureStorageValues = {};
+
 void main() {
+  // Initialize binding for flutter_secure_storage
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   late ApiService apiService;
   late MockHttpClient mockHttpClient;
 
   setUpAll(() {
     registerFallbackValue(FakeUri());
+    // Mock the secure storage method channel with in-memory storage
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+      const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
+      (MethodCall methodCall) async {
+        final args = methodCall.arguments as Map<dynamic, dynamic>?;
+        final key = args?['key'] as String?;
+
+        switch (methodCall.method) {
+          case 'read':
+            return _secureStorageValues[key];
+          case 'write':
+            final value = args?['value'] as String?;
+            if (key != null && value != null) {
+              _secureStorageValues[key] = value;
+            }
+            return null;
+          case 'delete':
+            if (key != null) {
+              _secureStorageValues.remove(key);
+            }
+            return null;
+          case 'deleteAll':
+            _secureStorageValues.clear();
+            return null;
+          default:
+            return null;
+        }
+      },
+    );
   });
 
   setUp(() {
+    // Clear secure storage before each test
+    _secureStorageValues.clear();
     mockHttpClient = MockHttpClient();
     apiService = ApiService(httpClient: mockHttpClient);
     SharedPreferences.setMockInitialValues({});
@@ -28,9 +67,8 @@ void main() {
   group('ApiService', () {
     group('getServerUrl', () {
       test('returns stored URL when available', () async {
-        SharedPreferences.setMockInitialValues({
-          'server_url': 'http://test:8080',
-        });
+        // Pre-populate secure storage
+        _secureStorageValues['server_url'] = 'http://test:8080';
         final service = ApiService(httpClient: mockHttpClient);
 
         final url = await service.getServerUrl();
@@ -39,32 +77,24 @@ void main() {
       });
 
       test('returns default localhost:8080 when no URL stored', () async {
-        SharedPreferences.setMockInitialValues({});
-        final service = ApiService(httpClient: mockHttpClient);
-
-        final url = await service.getServerUrl();
+        final url = await apiService.getServerUrl();
 
         expect(url, 'http://localhost:8080');
       });
     });
 
     group('setServerUrl', () {
-      test('stores the URL in SharedPreferences', () async {
-        SharedPreferences.setMockInitialValues({});
-        final service = ApiService(httpClient: mockHttpClient);
+      test('stores the URL in secure storage', () async {
+        await apiService.setServerUrl('http://newserver:9090');
 
-        await service.setServerUrl('http://newserver:9090');
-
-        final storedUrl = await service.getServerUrl();
+        final storedUrl = await apiService.getServerUrl();
         expect(storedUrl, 'http://newserver:9090');
       });
     });
 
     group('searchCards', () {
       test('returns CardSearchResult on success', () async {
-        SharedPreferences.setMockInitialValues({
-          'server_url': 'http://test:8080',
-        });
+        _secureStorageValues['server_url'] = 'http://test:8080';
         final service = ApiService(httpClient: mockHttpClient);
 
         when(() => mockHttpClient.get(any())).thenAnswer(
@@ -82,9 +112,7 @@ void main() {
       });
 
       test('throws exception with error message on failure', () async {
-        SharedPreferences.setMockInitialValues({
-          'server_url': 'http://test:8080',
-        });
+        _secureStorageValues['server_url'] = 'http://test:8080';
         final service = ApiService(httpClient: mockHttpClient);
 
         when(() => mockHttpClient.get(any())).thenAnswer(
@@ -105,9 +133,7 @@ void main() {
       });
 
       test('uses default error message when error field missing', () async {
-        SharedPreferences.setMockInitialValues({
-          'server_url': 'http://test:8080',
-        });
+        _secureStorageValues['server_url'] = 'http://test:8080';
         final service = ApiService(httpClient: mockHttpClient);
 
         when(() => mockHttpClient.get(any())).thenAnswer(
@@ -128,9 +154,7 @@ void main() {
       });
 
       test('constructs correct URL with query parameters', () async {
-        SharedPreferences.setMockInitialValues({
-          'server_url': 'http://test:8080',
-        });
+        _secureStorageValues['server_url'] = 'http://test:8080';
         final service = ApiService(httpClient: mockHttpClient);
 
         Uri? capturedUri;
@@ -154,9 +178,7 @@ void main() {
 
     group('identifyCard', () {
       test('returns ScanResult on success', () async {
-        SharedPreferences.setMockInitialValues({
-          'server_url': 'http://test:8080',
-        });
+        _secureStorageValues['server_url'] = 'http://test:8080';
         final service = ApiService(httpClient: mockHttpClient);
 
         when(() => mockHttpClient.post(
@@ -178,9 +200,7 @@ void main() {
       });
 
       test('throws exception with error message on failure', () async {
-        SharedPreferences.setMockInitialValues({
-          'server_url': 'http://test:8080',
-        });
+        _secureStorageValues['server_url'] = 'http://test:8080';
         final service = ApiService(httpClient: mockHttpClient);
 
         when(() => mockHttpClient.post(
@@ -205,9 +225,7 @@ void main() {
       });
 
       test('sends correct request body', () async {
-        SharedPreferences.setMockInitialValues({
-          'server_url': 'http://test:8080',
-        });
+        _secureStorageValues['server_url'] = 'http://test:8080';
         final service = ApiService(httpClient: mockHttpClient);
 
         String? capturedBody;
@@ -231,9 +249,7 @@ void main() {
       });
 
       test('sends Content-Type header', () async {
-        SharedPreferences.setMockInitialValues({
-          'server_url': 'http://test:8080',
-        });
+        _secureStorageValues['server_url'] = 'http://test:8080';
         final service = ApiService(httpClient: mockHttpClient);
 
         Map<String, String>? capturedHeaders;
@@ -258,9 +274,7 @@ void main() {
 
     group('addToCollection', () {
       test('completes successfully on 200 response', () async {
-        SharedPreferences.setMockInitialValues({
-          'server_url': 'http://test:8080',
-        });
+        _secureStorageValues['server_url'] = 'http://test:8080';
         final service = ApiService(httpClient: mockHttpClient);
 
         when(() => mockHttpClient.post(
@@ -278,9 +292,7 @@ void main() {
       });
 
       test('completes successfully on 201 response', () async {
-        SharedPreferences.setMockInitialValues({
-          'server_url': 'http://test:8080',
-        });
+        _secureStorageValues['server_url'] = 'http://test:8080';
         final service = ApiService(httpClient: mockHttpClient);
 
         when(() => mockHttpClient.post(
@@ -298,9 +310,7 @@ void main() {
       });
 
       test('throws exception with error message on failure', () async {
-        SharedPreferences.setMockInitialValues({
-          'server_url': 'http://test:8080',
-        });
+        _secureStorageValues['server_url'] = 'http://test:8080';
         final service = ApiService(httpClient: mockHttpClient);
 
         when(() => mockHttpClient.post(
@@ -325,9 +335,7 @@ void main() {
       });
 
       test('sends correct request body with default values', () async {
-        SharedPreferences.setMockInitialValues({
-          'server_url': 'http://test:8080',
-        });
+        _secureStorageValues['server_url'] = 'http://test:8080';
         final service = ApiService(httpClient: mockHttpClient);
 
         String? capturedBody;
@@ -350,9 +358,7 @@ void main() {
       });
 
       test('sends correct request body with custom values', () async {
-        SharedPreferences.setMockInitialValues({
-          'server_url': 'http://test:8080',
-        });
+        _secureStorageValues['server_url'] = 'http://test:8080';
         final service = ApiService(httpClient: mockHttpClient);
 
         String? capturedBody;
@@ -380,9 +386,7 @@ void main() {
       });
 
       test('uses correct endpoint URL', () async {
-        SharedPreferences.setMockInitialValues({
-          'server_url': 'http://test:8080',
-        });
+        _secureStorageValues['server_url'] = 'http://test:8080';
         final service = ApiService(httpClient: mockHttpClient);
 
         Uri? capturedUri;
