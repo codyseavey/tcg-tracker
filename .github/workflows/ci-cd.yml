@@ -304,24 +304,23 @@ jobs:
             exit 0
           fi
 
-          # Build indexes on production server (has GPU for fast inference)
-          echo "Building FAISS indexes on production server..."
-
           # Ensure data symlink exists (index builder expects data at backend/data/)
           ssh $SERVER "mkdir -p $APP_DIR/backend && ln -sfn $APP_DIR/data $APP_DIR/backend/data"
+          ssh $SERVER "cd $APP_DIR && ./identifier/venv/bin/pip install -q requests"
 
-          # Build Pokemon index if missing
+          # Start index builds in background on server (can take hours)
+          # Builds run asynchronously so deploy can complete
           if [ "$POKEMON_EXISTS" = "no" ]; then
-            echo "Building Pokemon FAISS index..."
-            ssh $SERVER "cd $APP_DIR && ./identifier/venv/bin/pip install -q requests"
-            ssh $SERVER "cd $APP_DIR && ./identifier/venv/bin/python -m identifier.index_builder.build_index_pokemon --repo-root $APP_DIR --out $APP_DIR/setid/indexes --per-set 6 --min-coverage 0.90"
+            echo "Starting Pokemon FAISS index build in background..."
+            ssh $SERVER "cd $APP_DIR && nohup ./identifier/venv/bin/python -m identifier.index_builder.build_index_pokemon --repo-root $APP_DIR --out $APP_DIR/setid/indexes --per-set 6 --min-coverage 0.90 > /tmp/pokemon-index-build.log 2>&1 &"
           fi
 
-          # Build MTG index if missing
           if [ "$MTG_EXISTS" = "no" ]; then
-            echo "Building MTG FAISS index..."
-            ssh $SERVER "cd $APP_DIR && ./identifier/venv/bin/python -m identifier.index_builder.build_index_mtg --out $APP_DIR/setid/indexes --per-set 6 --min-coverage 0.85"
+            echo "Starting MTG FAISS index build in background..."
+            ssh $SERVER "cd $APP_DIR && nohup ./identifier/venv/bin/python -m identifier.index_builder.build_index_mtg --out $APP_DIR/setid/indexes --per-set 6 --min-coverage 0.85 > /tmp/mtg-index-build.log 2>&1 &"
           fi
+
+          echo "Index builds started in background. Check /tmp/*-index-build.log on server for progress."
 
       - name: Start identifier service
         run: |
