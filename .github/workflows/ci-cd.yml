@@ -386,7 +386,7 @@ jobs:
     environment: production
     env:
       SERVER: "192.168.86.227"
-      APP_DIR: "/opt/tcg-tracker"
+      APP_DIR: "/home/cody/tcg-tracker"
       IMAGE_TAG: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
