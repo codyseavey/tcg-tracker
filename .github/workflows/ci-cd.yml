@@ -109,7 +109,7 @@ jobs:
         with:
           images: ${{ env.IMAGE_PREFIX }}/backend
           tags: |
-            type=sha,prefix=
+            type=sha,prefix=,format=long
             type=raw,value=latest
 
       - name: Build and push backend image
@@ -191,7 +191,7 @@ jobs:
         with:
           images: ${{ env.IMAGE_PREFIX }}/frontend
           tags: |
-            type=sha,prefix=
+            type=sha,prefix=,format=long
             type=raw,value=latest
 
       - name: Build and push frontend image
@@ -230,7 +230,7 @@ jobs:
         with:
           images: ${{ env.IMAGE_PREFIX }}/identifier
           tags: |
-            type=sha,prefix=
+            type=sha,prefix=,format=long
             type=raw,value=latest
 
       - name: Build and push identifier image
