@@ -401,16 +401,6 @@ jobs:
         run: |
           ssh $SERVER "mkdir -p $APP_DIR/data/pokemon-tcg-data"
 
-          # Migrate database if exists at old location
-          if ssh $SERVER "test -f /opt/tcg-tracker/tcg_tracker.db"; then
-            if ssh $SERVER "test ! -f $APP_DIR/data/tcg_tracker.db"; then
-              echo "Migrating database from old location..."
-              ssh $SERVER "cp /opt/tcg-tracker/tcg_tracker.db $APP_DIR/data/tcg_tracker.db"
-            else
-              echo "Database already exists at new location"
-            fi
-          fi
-
       - name: Save IMAGE_TAG for systemd service
         run: |
           ssh $SERVER "echo 'IMAGE_TAG=${{ github.sha }}' > $APP_DIR/.env.deploy"
