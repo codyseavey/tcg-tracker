@@ -189,14 +189,15 @@ Optional admin key authentication protects collection modification endpoints:
 - Prices keyed by card_id + condition + printing (Normal, Foil, 1st Edition, etc.)
 - Base prices (NM only) kept in `cards` table for backward compatibility
 - All prices come from JustTCG API (no fallback to other sources for uniform data)
-- `PriceService` provides unified price fetching:
-  1. Check database cache (fresh within 24 hours)
-  2. Try JustTCG API (condition-specific pricing for Pokemon and MTG)
-  3. Return stale cached price if API unavailable
+- `PriceService` returns cached data only (no live API calls):
+  1. Return exact condition/printing match from `card_prices`
+  2. Fall back to NM price for non-NM conditions
+  3. Fall back to card's base price fields
+- Viewing card prices (`GET /cards/:id/prices`) auto-queues refresh if stale
 
 ### Price Worker
 The background price worker (`PriceWorker`) updates prices with priority ordering:
-1. **User-requested refreshes** - Cards queued via `/cards/:id/refresh-price` endpoint
+1. **User-requested refreshes** - Cards queued via `/cards/:id/refresh-price` or stale price views
 2. **Collection cards without prices** - New additions needing initial pricing
 3. **Collection cards with oldest prices** - Stale cache refresh
 

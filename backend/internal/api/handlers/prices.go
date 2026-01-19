@@ -56,6 +56,7 @@ func (h *PriceHandler) RefreshCardPrice(c *gin.Context) {
 }
 
 // GetCardPrices returns all condition-specific prices for a card
+// Returns cached prices immediately and queues a background refresh if stale
 func (h *PriceHandler) GetCardPrices(c *gin.Context) {
 	cardID := c.Param("id")
 
@@ -73,7 +74,13 @@ func (h *PriceHandler) GetCardPrices(c *gin.Context) {
 		return
 	}
 
-	// Get all prices for this card
+	// Check if prices need refresh and queue if so
+	needsRefresh := h.priceService.NeedsRefresh(cardID)
+	if needsRefresh {
+		h.priceWorker.QueueRefresh(cardID)
+	}
+
+	// Get cached prices (no live API call)
 	prices, err := h.priceService.GetAllConditionPrices(&card)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -81,7 +88,8 @@ func (h *PriceHandler) GetCardPrices(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"card_id": cardID,
-		"prices":  prices,
+		"card_id":        cardID,
+		"prices":         prices,
+		"refresh_queued": needsRefresh,
 	})
 }

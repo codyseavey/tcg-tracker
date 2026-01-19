@@ -29,48 +29,33 @@ func NewPriceService(justTCG *JustTCGService, db *gorm.DB) *PriceService {
 	}
 }
 
-// GetPrice returns the price for a specific card, condition, and printing type
-// Fallback order: DB cache -> JustTCG -> stale cache
+// GetPrice returns the cached price for a specific card, condition, and printing type
+// No live API calls - returns cached data only
+// Fallback order: DB cache (exact match) -> DB cache (NM fallback) -> card base price
 func (s *PriceService) GetPrice(card *models.Card, condition models.PriceCondition, printing models.PrintingType) (float64, string, error) {
-	// 1. Check database cache for fresh condition-specific price
+	// 1. Check database cache for exact condition/printing match
 	cachedPrice, err := s.getCachedPrice(card.ID, condition, printing)
-	if err == nil && cachedPrice != nil && s.isFresh(cachedPrice.PriceUpdatedAt) {
-		return cachedPrice.PriceUSD, cachedPrice.Source, nil
+	if err == nil && cachedPrice != nil {
+		source := cachedPrice.Source
+		if !s.isFresh(cachedPrice.PriceUpdatedAt) {
+			source += " (stale)"
+		}
+		return cachedPrice.PriceUSD, source, nil
 	}
 
-	// 2. Try JustTCG for condition-specific pricing
-	if s.justTCG != nil {
-		prices, err := s.justTCG.GetCardPrices(card.Name, card.SetCode, card.Game)
-		if err == nil && len(prices) > 0 {
-			// Save all prices to cache
-			s.saveCardPrices(card.ID, prices)
-
-			// Return the requested price
-			for _, p := range prices {
-				if p.Condition == condition && p.Printing == printing {
-					return p.PriceUSD, "justtcg", nil
-				}
+	// 2. Try NM price as fallback for non-NM conditions
+	if condition != models.PriceConditionNM {
+		nmPrice, err := s.getCachedPrice(card.ID, models.PriceConditionNM, printing)
+		if err == nil && nmPrice != nil {
+			source := nmPrice.Source
+			if !s.isFresh(nmPrice.PriceUpdatedAt) {
+				source += " (stale)"
 			}
-
-			// If exact condition not found, try NM as fallback
-			if condition != models.PriceConditionNM {
-				for _, p := range prices {
-					if p.Condition == models.PriceConditionNM && p.Printing == printing {
-						return p.PriceUSD, "justtcg", nil
-					}
-				}
-			}
-		} else if err != nil {
-			log.Printf("JustTCG price fetch failed for %s: %v", card.Name, err)
+			return nmPrice.PriceUSD, source, nil
 		}
 	}
 
-	// 3. Return stale cached price if available
-	if cachedPrice != nil {
-		return cachedPrice.PriceUSD, cachedPrice.Source + " (stale)", nil
-	}
-
-	// 4. Fallback to card's base price (from previous JustTCG fetch)
+	// 3. Fallback to card's base price
 	isFoilVariant := printing.IsFoilVariant()
 	if isFoilVariant && card.PriceFoilUSD > 0 {
 		return card.PriceFoilUSD, "cached", nil
@@ -82,8 +67,9 @@ func (s *PriceService) GetPrice(card *models.Card, condition models.PriceConditi
 	return 0, "", nil
 }
 
-// GetAllConditionPrices returns all available prices for a card
-// Priority: fresh cache -> JustTCG API -> stale cache -> base prices
+// GetAllConditionPrices returns all cached prices for a card (no live API calls)
+// Returns cached prices, stale prices, or base prices from the card record
+// Use NeedsRefresh to check if the card should be queued for background update
 func (s *PriceService) GetAllConditionPrices(card *models.Card) ([]models.CardPrice, error) {
 	// 1. Check if we have cached prices
 	var cachedPrices []models.CardPrice
@@ -91,38 +77,12 @@ func (s *PriceService) GetAllConditionPrices(card *models.Card) ([]models.CardPr
 		log.Printf("Failed to fetch cached prices for card %s: %v", card.ID, err)
 	}
 
-	// Check if all cached prices are fresh
-	allFresh := len(cachedPrices) > 0
-	for _, p := range cachedPrices {
-		if !s.isFresh(p.PriceUpdatedAt) {
-			allFresh = false
-			break
-		}
-	}
-
-	// If all cached prices are fresh, return them
-	if allFresh {
-		return cachedPrices, nil
-	}
-
-	// 2. Try to fetch fresh prices from JustTCG
-	if s.justTCG != nil {
-		prices, err := s.justTCG.GetCardPrices(card.Name, card.SetCode, card.Game)
-		if err == nil && len(prices) > 0 {
-			for i := range prices {
-				prices[i].CardID = card.ID
-			}
-			s.saveCardPrices(card.ID, prices)
-			return prices, nil
-		}
-	}
-
-	// 3. Return cached prices even if stale
+	// Return cached prices if we have any
 	if len(cachedPrices) > 0 {
 		return cachedPrices, nil
 	}
 
-	// 4. Return base prices from card (from previous JustTCG fetch)
+	// 2. Return base prices from card (from previous JustTCG fetch)
 	var basePrices []models.CardPrice
 	if card.PriceUSD > 0 {
 		basePrices = append(basePrices, models.CardPrice{
@@ -146,6 +106,27 @@ func (s *PriceService) GetAllConditionPrices(card *models.Card) ([]models.CardPr
 	}
 
 	return basePrices, nil
+}
+
+// NeedsRefresh returns true if the card's prices are stale or missing
+func (s *PriceService) NeedsRefresh(cardID string) bool {
+	var cachedPrices []models.CardPrice
+	if err := s.db.Where("card_id = ?", cardID).Find(&cachedPrices).Error; err != nil {
+		return true // Error fetching = assume needs refresh
+	}
+
+	if len(cachedPrices) == 0 {
+		return true // No cached prices
+	}
+
+	// Check if any price is stale
+	for _, p := range cachedPrices {
+		if !s.isFresh(p.PriceUpdatedAt) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // UpdateCardPrices fetches and saves all condition prices for a card
