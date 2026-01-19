@@ -28,6 +28,9 @@ RUN pip install --no-cache-dir -r requirements.txt \
 # Copy application code
 COPY . .
 
+# Install the package in editable mode so 'identifier' module is importable
+RUN pip install --no-cache-dir -e .
+
 # Environment variables
 ENV HOST=0.0.0.0
 ENV PORT=8099
