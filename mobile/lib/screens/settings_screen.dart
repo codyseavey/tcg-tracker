@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/theme_provider.dart';
 import '../services/api_service.dart';
+import '../widgets/admin_key_dialog.dart';
 
 class SettingsScreen extends StatefulWidget {
   final ApiService? apiService;
@@ -19,6 +20,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isLoading = true;
   bool _isTesting = false;
   bool? _connectionSuccess;
+  bool _hasAdminKey = false;
+  bool? _authEnabled;
 
   @override
   void initState() {
@@ -30,7 +33,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _loadSettings() async {
     final serverUrl = await _apiService.getServerUrl();
     _serverUrlController.text = serverUrl;
-    setState(() => _isLoading = false);
+
+    // Check auth status
+    final hasKey = await _apiService.authService.hasAdminKey();
+    final authEnabled = await _apiService.authService.checkAuthEnabled(
+      serverUrl,
+    );
+
+    setState(() {
+      _hasAdminKey = hasKey;
+      _authEnabled = authEnabled;
+      _isLoading = false;
+    });
   }
 
   String? _validateUrl(String? value) {
@@ -86,11 +100,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(success
-                ? 'Connection successful!'
-                : 'Could not connect to server'),
-            backgroundColor:
-                success ? Colors.green : Theme.of(context).colorScheme.error,
+            content: Text(
+              success
+                  ? 'Connection successful!'
+                  : 'Could not connect to server',
+            ),
+            backgroundColor: success
+                ? Colors.green
+                : Theme.of(context).colorScheme.error,
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -135,8 +152,61 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
     );
 
-    // Clear connection status after saving
-    setState(() => _connectionSuccess = null);
+    // Clear connection status after saving and refresh auth status
+    final authEnabled = await _apiService.authService.checkAuthEnabled(url);
+    setState(() {
+      _connectionSuccess = null;
+      _authEnabled = authEnabled;
+    });
+  }
+
+  Future<void> _showAdminKeyDialog() async {
+    final success = await AdminKeyDialog.show(context, _apiService);
+    if (success && mounted) {
+      setState(() => _hasAdminKey = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Admin access granted!'),
+          backgroundColor: Colors.green,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _clearAdminKey() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Clear Admin Key?'),
+        content: const Text(
+          'You will need to re-enter the admin key to modify the collection.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await _apiService.authService.clearAdminKey();
+      if (mounted) {
+        setState(() => _hasAdminKey = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Admin key cleared'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -151,9 +221,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Settings'),
-      ),
+      appBar: AppBar(title: const Text('Settings')),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
           : Form(
@@ -258,10 +326,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               ? const SizedBox(
                                   width: 18,
                                   height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
                                 )
                               : const Icon(Icons.wifi_find),
-                          label: Text(_isTesting ? 'Testing...' : 'Test Connection'),
+                          label: Text(
+                            _isTesting ? 'Testing...' : 'Test Connection',
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -274,6 +346,65 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 32),
+                  const Divider(),
+                  const SizedBox(height: 16),
+                  // Admin Key Section
+                  Text(
+                    'Admin Access',
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _authEnabled == true
+                        ? 'An admin key is required to modify the collection on this server.'
+                        : 'Authentication is not enabled on this server.',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  if (_authEnabled == true) ...[
+                    Card(
+                      child: ListTile(
+                        leading: Icon(
+                          _hasAdminKey ? Icons.lock_open : Icons.lock,
+                          color: _hasAdminKey
+                              ? Colors.green
+                              : colorScheme.primary,
+                        ),
+                        title: Text(
+                          _hasAdminKey
+                              ? 'Admin key configured'
+                              : 'No admin key',
+                        ),
+                        subtitle: Text(
+                          _hasAdminKey
+                              ? 'You have admin access to modify the collection'
+                              : 'Tap to enter your admin key',
+                        ),
+                        trailing: _hasAdminKey
+                            ? TextButton(
+                                onPressed: _clearAdminKey,
+                                child: const Text('Clear'),
+                              )
+                            : const Icon(Icons.chevron_right),
+                        onTap: _hasAdminKey ? null : _showAdminKeyDialog,
+                      ),
+                    ),
+                  ] else if (_authEnabled == false) ...[
+                    Card(
+                      child: ListTile(
+                        leading: Icon(Icons.lock_open, color: Colors.green),
+                        title: const Text('No authentication required'),
+                        subtitle: const Text(
+                          'All collection operations are allowed',
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 32),
                   const Divider(),
                   const SizedBox(height: 16),

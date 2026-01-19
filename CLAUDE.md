@@ -64,6 +64,7 @@ Environment variables (see `backend/.env.example`):
 - `POKEMON_DATA_DIR` - Directory for pokemon-tcg-data (auto-downloaded on first run)
 - `JUSTTCG_API_KEY` - JustTCG API key for condition-based pricing (optional)
 - `JUSTTCG_DAILY_LIMIT` - Daily API request limit (default: 100)
+- `ADMIN_KEY` - Admin key for collection modification (optional, disables auth if not set)
 
 ### Frontend
 ```bash
@@ -112,6 +113,7 @@ Environment variables:
 | `PriceWorker` | `internal/services/price_worker.go` | Background price updates with priority queue (user requests, then collection) |
 | `OCRParser` | `internal/services/ocr_parser.go` | Parse OCR text to extract card details |
 | `ServerOCRService` | `internal/services/server_ocr.go` | Server-side OCR using identifier service (EasyOCR) |
+| `AdminKeyAuth` | `internal/middleware/auth.go` | Admin key authentication middleware |
 
 ### Identifier Service (Python)
 
@@ -141,13 +143,17 @@ Base URL: `http://localhost:8080/api`
 - `GET /cards/ocr-status` - Check if server-side OCR is available
 - `POST /cards/:id/refresh-price` - Refresh single card price
 
+### Auth
+- `GET /auth/status` - Check if authentication is enabled
+- `POST /auth/verify` - Verify admin key (returns valid: true/false)
+
 ### Collection
 - `GET /collection` - Get user's collection
-- `POST /collection` - Add card to collection
-- `PUT /collection/:id` - Update collection item
-- `DELETE /collection/:id` - Remove from collection
+- `POST /collection` - Add card to collection (🔒 requires admin key)
+- `PUT /collection/:id` - Update collection item (🔒 requires admin key)
+- `DELETE /collection/:id` - Remove from collection (🔒 requires admin key)
 - `GET /collection/stats` - Get collection statistics
-- `POST /collection/refresh-prices` - Queue background price refresh
+- `POST /collection/refresh-prices` - Queue background price refresh (🔒 requires admin key)
 
 ### Prices
 - `GET /prices/status` - Get API quota status
@@ -167,6 +173,15 @@ Base URL: `http://localhost:8080/api`
 4. **Price Updates**: Background worker runs hourly → Updates 20 cards per batch via JustTCG (with TCGdex/Scryfall fallback)
 
 ## Important Implementation Details
+
+### Authentication
+Optional admin key authentication protects collection modification endpoints:
+- Set `ADMIN_KEY` environment variable to enable (generate with `openssl rand -base64 32`)
+- If `ADMIN_KEY` is not set, all operations are allowed (backwards compatible for local dev)
+- Protected endpoints: `POST /collection`, `PUT /collection/:id`, `DELETE /collection/:id`, `POST /collection/refresh-prices`
+- Key sent via `Authorization: Bearer <key>` header
+- Constant-time comparison prevents timing attacks
+- Frontend/mobile prompt for key on 401 response, store in localStorage/SecureStorage
 
 ### Price Caching
 - Condition and printing-specific prices (NM, LP, MP, HP, DMG) stored in `card_prices` table

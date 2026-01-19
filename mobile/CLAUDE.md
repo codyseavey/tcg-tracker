@@ -26,11 +26,14 @@ lib/
 ├── screens/
 │   ├── camera_screen.dart      # Camera capture + OCR, home screen
 │   ├── scan_result_screen.dart # Display results, add to collection
-│   └── settings_screen.dart    # Server URL configuration
+│   └── settings_screen.dart    # Server URL configuration, admin key management
 └── services/
     ├── api_service.dart        # HTTP client, backend communication
+    ├── auth_service.dart       # Admin key authentication
     ├── camera_service.dart     # Camera abstraction (testable)
     └── ocr_service.dart        # ML Kit OCR abstraction (testable)
+└── widgets/
+    └── admin_key_dialog.dart   # Dialog for entering admin key
 ```
 
 **Service layer uses constructor injection** for testability - all services accept optional dependencies that default to real implementations.
@@ -76,6 +79,8 @@ Helper getters: `CardModel.displayPrice` returns formatted price or "N/A", `Card
 - Server URL stored in secure storage (default: `https://tcg.seavey.dev`)
 - 35-second timeout on all HTTP requests
 - ApiService methods: `searchCards(query, game)`, `identifyCard(text, game)`, `addToCollection(cardId, quantity, condition, printing)`
+- Admin key stored in secure storage, added to `Authorization: Bearer <key>` header for protected endpoints
+- 401 responses trigger `AuthRequiredException`, prompting user for admin key via `AdminKeyDialog`
 
 ## Key Dependencies
 
@@ -85,6 +90,7 @@ Helper getters: `CardModel.displayPrice` returns formatted price or "N/A", `Card
 | `google_mlkit_text_recognition` | OCR text extraction |
 | `http` | HTTP client |
 | `shared_preferences` | Local storage |
+| `flutter_secure_storage` | Secure storage for admin key |
 | `permission_handler` | Camera permissions |
 | `mocktail` | Test mocking |
 | `network_image_mock` | Mock network images in tests |

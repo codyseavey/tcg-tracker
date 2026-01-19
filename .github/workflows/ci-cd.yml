@@ -415,7 +415,7 @@ jobs:
         run: |
           ssh $SERVER "cd $APP_DIR && IMAGE_TAG=${{ github.sha }} docker compose pull"
           ssh $SERVER "cd $APP_DIR && IMAGE_TAG=${{ github.sha }} docker compose down --remove-orphans || true"
-          ssh $SERVER "cd $APP_DIR && IMAGE_TAG=${{ github.sha }} docker compose up -d"
+          ssh $SERVER "cd $APP_DIR && IMAGE_TAG=${{ github.sha }} JUSTTCG_API_KEY='${{ secrets.JUSTTCG_API_KEY }}' ADMIN_KEY='${{ secrets.ADMIN_KEY }}' docker compose up -d"
 
       - name: Wait for services to be healthy
         run: |

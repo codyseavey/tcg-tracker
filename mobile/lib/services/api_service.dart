@@ -10,6 +10,7 @@ import '../models/collection_item.dart' show CollectionItem, PrintingType;
 import '../models/collection_stats.dart';
 import '../models/price_status.dart';
 import 'image_analysis_service.dart';
+import 'auth_service.dart';
 
 class ApiService {
   static const String _serverUrlKey = 'server_url';
@@ -23,10 +24,21 @@ class ApiService {
 
   final http.Client _httpClient;
   final FlutterSecureStorage _secureStorage;
+  final AuthService _authService;
 
-  ApiService({http.Client? httpClient, FlutterSecureStorage? secureStorage})
-    : _httpClient = httpClient ?? http.Client(),
-      _secureStorage = secureStorage ?? const FlutterSecureStorage();
+  // Callback for when auth is required (401 response)
+  void Function()? onAuthRequired;
+
+  ApiService({
+    http.Client? httpClient,
+    FlutterSecureStorage? secureStorage,
+    AuthService? authService,
+  }) : _httpClient = httpClient ?? http.Client(),
+       _secureStorage = secureStorage ?? const FlutterSecureStorage(),
+       _authService = authService ?? AuthService();
+
+  /// Get the auth service for direct access
+  AuthService get authService => _authService;
 
   /// Safely decode JSON, returning a map with error key if decoding fails
   Map<String, dynamic> _safeJsonDecode(String body) {
@@ -162,16 +174,24 @@ class ApiService {
       body['scanned_image_data'] = base64Encode(scannedImageBytes);
     }
 
+    // Get auth headers for protected endpoint
+    final authHeaders = await _authService.getAuthHeaders();
+
     final response = await _httpClient
         .post(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: {'Content-Type': 'application/json', ...authHeaders},
           body: json.encode(body),
         )
         .timeout(
           const Duration(seconds: 35),
           onTimeout: () => throw Exception('Request timed out'),
         );
+
+    if (response.statusCode == 401) {
+      onAuthRequired?.call();
+      throw AuthRequiredException('Admin access required to add cards');
+    }
 
     if (response.statusCode != 200 && response.statusCode != 201) {
       final error = _safeJsonDecode(response.body);
@@ -244,16 +264,24 @@ class ApiService {
     if (printing != null) body['printing'] = printing.value;
     if (notes != null) body['notes'] = notes;
 
+    // Get auth headers for protected endpoint
+    final authHeaders = await _authService.getAuthHeaders();
+
     final response = await _httpClient
         .put(
           uri,
-          headers: {'Content-Type': 'application/json'},
+          headers: {'Content-Type': 'application/json', ...authHeaders},
           body: json.encode(body),
         )
         .timeout(
           const Duration(seconds: 35),
           onTimeout: () => throw Exception('Request timed out'),
         );
+
+    if (response.statusCode == 401) {
+      onAuthRequired?.call();
+      throw AuthRequiredException('Admin access required to update cards');
+    }
 
     if (response.statusCode == 200) {
       return CollectionItem.fromJson(json.decode(response.body));
@@ -268,12 +296,20 @@ class ApiService {
     final serverUrl = await getServerUrl();
     final uri = Uri.parse('$serverUrl/api/collection/$id');
 
+    // Get auth headers for protected endpoint
+    final authHeaders = await _authService.getAuthHeaders();
+
     final response = await _httpClient
-        .delete(uri)
+        .delete(uri, headers: authHeaders)
         .timeout(
           const Duration(seconds: 35),
           onTimeout: () => throw Exception('Request timed out'),
         );
+
+    if (response.statusCode == 401) {
+      onAuthRequired?.call();
+      throw AuthRequiredException('Admin access required to delete cards');
+    }
 
     if (response.statusCode != 200) {
       final error = _safeJsonDecode(response.body);
@@ -286,12 +322,20 @@ class ApiService {
     final serverUrl = await getServerUrl();
     final uri = Uri.parse('$serverUrl/api/collection/refresh-prices');
 
+    // Get auth headers for protected endpoint
+    final authHeaders = await _authService.getAuthHeaders();
+
     final response = await _httpClient
-        .post(uri)
+        .post(uri, headers: authHeaders)
         .timeout(
           const Duration(seconds: 35),
           onTimeout: () => throw Exception('Request timed out'),
         );
+
+    if (response.statusCode == 401) {
+      onAuthRequired?.call();
+      throw AuthRequiredException('Admin access required to refresh prices');
+    }
 
     if (response.statusCode == 200) {
       final data = json.decode(response.body);

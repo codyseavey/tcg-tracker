@@ -3,18 +3,30 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:mobile/screens/settings_screen.dart';
 import 'package:mobile/services/api_service.dart';
+import 'package:mobile/services/auth_service.dart';
 import 'package:mobile/providers/theme_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class MockApiService extends Mock implements ApiService {}
 
+class MockAuthService extends Mock implements AuthService {}
+
 void main() {
   late MockApiService mockApiService;
+  late MockAuthService mockAuthService;
 
   setUp(() {
     SharedPreferences.setMockInitialValues({});
     mockApiService = MockApiService();
+    mockAuthService = MockAuthService();
+
+    // Stub the authService getter
+    when(() => mockApiService.authService).thenReturn(mockAuthService);
+
+    // Stub auth service methods with sensible defaults
+    when(() => mockAuthService.hasAdminKey()).thenAnswer((_) async => false);
+    when(() => mockAuthService.checkAuthEnabled(any())).thenAnswer((_) async => false);
   });
 
   Widget createWidget() {
@@ -114,6 +126,14 @@ void main() {
       );
 
       await tester.pumpWidget(createWidget());
+      await tester.pumpAndSettle();
+
+      // Scroll down to find version info (it may be below the fold)
+      await tester.scrollUntilVisible(
+        find.text('TCG Tracker Mobile'),
+        200.0,
+        scrollable: find.byType(Scrollable).first,
+      );
       await tester.pumpAndSettle();
 
       expect(find.text('TCG Tracker Mobile'), findsOneWidget);

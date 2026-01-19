@@ -98,6 +98,7 @@ Environment variables:
 - `DB_PATH` - SQLite database path (default: ./tcg_tracker.db)
 - `POKEMON_DATA_DIR` - Pokemon TCG data directory
 - `IDENTIFIER_SERVICE_URL` - Identifier service URL (default: http://127.0.0.1:8099)
+- `ADMIN_KEY` - Admin key for collection modification (optional, auth disabled if not set)
 
 #### 2. Frontend (Vue.js Web App)
 
@@ -143,12 +144,18 @@ Configure the server URL in settings to point to your backend IP.
 - `POST /api/cards/identify` - Identify card from OCR text
 - `POST /api/cards/identify-image` - Identify card from uploaded image
 
+### Auth
+- `GET /api/auth/status` - Check if authentication is enabled
+- `POST /api/auth/verify` - Verify admin key
+
 ### Collection
 - `GET /api/collection` - Get all collection items
-- `POST /api/collection` - Add card to collection
-- `PUT /api/collection/:id` - Update collection item
-- `DELETE /api/collection/:id` - Remove from collection
+- `POST /api/collection` - Add card to collection (🔒)
+- `PUT /api/collection/:id` - Update collection item (🔒)
+- `DELETE /api/collection/:id` - Remove from collection (🔒)
 - `GET /api/collection/stats` - Get collection statistics
+
+*🔒 = Requires admin key if `ADMIN_KEY` is set*
 
 ### Identifier Service (port 8099)
 - `GET /health` - Service health and GPU status

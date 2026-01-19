@@ -1,9 +1,41 @@
 import axios from 'axios'
 
+const ADMIN_KEY_STORAGE = 'tcg-admin-key'
+
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL || '/api',
   timeout: 10000,
 })
+
+// Auth error callback - set by the app to handle 401 errors
+let onAuthError = null
+
+/**
+ * Register a callback to be called when a 401 error occurs
+ * @param {Function} callback - Called with the failed request config
+ */
+export function setAuthErrorHandler(callback) {
+  onAuthError = callback
+}
+
+/**
+ * Get the stored admin key
+ */
+export function getStoredAdminKey() {
+  return localStorage.getItem(ADMIN_KEY_STORAGE)
+}
+
+// Request interceptor to add auth header
+api.interceptors.request.use(
+  config => {
+    const adminKey = getStoredAdminKey()
+    if (adminKey) {
+      config.headers.Authorization = `Bearer ${adminKey}`
+    }
+    return config
+  },
+  error => Promise.reject(error)
+)
 
 // Response interceptor for error handling
 api.interceptors.response.use(
@@ -16,6 +48,15 @@ api.interceptors.response.use(
     // Handle network errors
     else if (!error.response) {
       error.message = 'Network error. Please check your connection.'
+    }
+    // Handle auth errors
+    else if (error.response.status === 401) {
+      error.message = error.response.data?.error || 'Authentication required'
+      error.isAuthError = true
+      // Notify the app about the auth error
+      if (onAuthError) {
+        onAuthError(error)
+      }
     }
     // Handle server errors
     else if (error.response.status >= 500) {
@@ -124,6 +165,27 @@ export const priceService = {
 
   async refreshCardPrice(cardId) {
     const response = await api.post(`/cards/${cardId}/refresh-price`)
+    return response.data
+  }
+}
+
+export const authService = {
+  /**
+   * Check if authentication is enabled on the server
+   */
+  async getStatus() {
+    const response = await api.get('/auth/status')
+    return response.data
+  },
+
+  /**
+   * Verify an admin key
+   * @param {string} key - The admin key to verify
+   */
+  async verifyKey(key) {
+    const response = await api.post('/auth/verify', null, {
+      headers: { Authorization: `Bearer ${key}` }
+    })
     return response.data
   }
 }

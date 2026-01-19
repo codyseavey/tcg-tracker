@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/codyseavey/tcg-tracker/backend/internal/api/handlers"
+	"github.com/codyseavey/tcg-tracker/backend/internal/middleware"
 	"github.com/codyseavey/tcg-tracker/backend/internal/services"
 )
 
@@ -42,10 +43,20 @@ func SetupRouter(scryfallService *services.ScryfallService, pokemonService *serv
 		router.Static("/images/scanned", imageStorageService.GetStorageDir())
 	}
 
+	// Admin key auth middleware for protected routes
+	adminAuth := middleware.AdminKeyAuth()
+
 	// API routes
 	api := router.Group("/api")
 	{
-		// Card routes
+		// Auth routes (public)
+		auth := api.Group("/auth")
+		{
+			auth.GET("/status", middleware.GetAuthStatus)
+			auth.POST("/verify", middleware.VerifyAdminKey)
+		}
+
+		// Card routes (all public)
 		cards := api.Group("/cards")
 		{
 			cards.GET("/search", cardHandler.SearchCards)
@@ -60,15 +71,18 @@ func SetupRouter(scryfallService *services.ScryfallService, pokemonService *serv
 		// Collection routes
 		collection := api.Group("/collection")
 		{
+			// Public routes (read-only)
 			collection.GET("", collectionHandler.GetCollection)
-			collection.POST("", collectionHandler.AddToCollection)
-			collection.PUT("/:id", collectionHandler.UpdateCollectionItem)
-			collection.DELETE("/:id", collectionHandler.DeleteCollectionItem)
 			collection.GET("/stats", collectionHandler.GetStats)
-			collection.POST("/refresh-prices", collectionHandler.RefreshPrices)
+
+			// Protected routes (require admin key)
+			collection.POST("", adminAuth, collectionHandler.AddToCollection)
+			collection.PUT("/:id", adminAuth, collectionHandler.UpdateCollectionItem)
+			collection.DELETE("/:id", adminAuth, collectionHandler.DeleteCollectionItem)
+			collection.POST("/refresh-prices", adminAuth, collectionHandler.RefreshPrices)
 		}
 
-		// Price routes
+		// Price routes (public)
 		prices := api.Group("/prices")
 		{
 			prices.GET("/status", priceHandler.GetPriceStatus)

@@ -24,6 +24,8 @@ services:
       - POKEMON_DATA_DIR=/app/data/pokemon-tcg-data
       - GIN_MODE=release
       - IDENTIFIER_SERVICE_URL=http://identifier:8099
+      - JUSTTCG_API_KEY=${JUSTTCG_API_KEY:-}
+      - ADMIN_KEY=${ADMIN_KEY:-}
     depends_on:
       - identifier
     volumes:

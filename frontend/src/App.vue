@@ -1,12 +1,22 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useThemeStore } from './stores/theme'
+import { useAuthStore } from './stores/auth'
+import { setAuthErrorHandler } from './services/api'
+import AdminKeyModal from './components/AdminKeyModal.vue'
 
 const mobileMenuOpen = ref(false)
 const themeStore = useThemeStore()
+const authStore = useAuthStore()
 
 onMounted(() => {
   themeStore.initTheme()
+  authStore.checkAuthStatus()
+
+  // Register handler for 401 errors from API
+  setAuthErrorHandler(() => {
+    authStore.handleAuthError()
+  })
 })
 
 const cycleTheme = () => {
@@ -56,6 +66,23 @@ const themeIcon = () => {
             >
               + Add Card
             </router-link>
+            <!-- Auth status / lock toggle -->
+            <button
+              v-if="authStore.authEnabled"
+              @click="authStore.isAuthenticated ? authStore.clearAdminKey() : authStore.promptForAuth()"
+              class="p-2 rounded-md transition"
+              :class="authStore.isAuthenticated 
+                ? 'text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300' 
+                : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'"
+              :title="authStore.isAuthenticated ? 'Authenticated (click to lock)' : 'Click to unlock admin access'"
+            >
+              <svg v-if="authStore.isAuthenticated" class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+              </svg>
+              <svg v-else class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            </button>
             <!-- Theme toggle -->
             <button
               @click="cycleTheme"
@@ -70,6 +97,22 @@ const themeIcon = () => {
 
           <!-- Mobile menu button -->
           <div class="md:hidden flex items-center space-x-2">
+            <!-- Auth status (mobile) -->
+            <button
+              v-if="authStore.authEnabled"
+              @click="authStore.isAuthenticated ? authStore.clearAdminKey() : authStore.promptForAuth()"
+              class="p-2"
+              :class="authStore.isAuthenticated 
+                ? 'text-green-600 dark:text-green-400' 
+                : 'text-gray-600 dark:text-gray-300'"
+            >
+              <svg v-if="authStore.isAuthenticated" class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z" />
+              </svg>
+              <svg v-else class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+            </button>
             <!-- Theme toggle (mobile) -->
             <button
               @click="cycleTheme"
@@ -135,5 +178,8 @@ const themeIcon = () => {
     <main class="max-w-7xl mx-auto px-4 py-8">
       <router-view />
     </main>
+
+    <!-- Admin Key Modal -->
+    <AdminKeyModal />
   </div>
 </template>

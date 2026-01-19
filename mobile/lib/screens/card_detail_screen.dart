@@ -5,7 +5,9 @@ import '../models/card.dart';
 import '../models/collection_item.dart';
 import '../providers/collection_provider.dart';
 import '../services/api_service.dart';
+import '../services/auth_service.dart';
 import '../utils/constants.dart';
+import '../widgets/admin_key_dialog.dart';
 
 class CardDetailScreen extends StatefulWidget {
   final CollectionItem? collectionItem;
@@ -686,6 +688,14 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
         ),
       );
       navigator.pop();
+    } on AuthRequiredException {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      // Show admin key dialog and retry on success
+      final success = await AdminKeyDialog.show(context, ApiService());
+      if (success && mounted) {
+        _updateItem(); // Retry after authentication
+      }
     } catch (e) {
       if (!mounted) return;
       messenger.showSnackBar(
@@ -722,6 +732,14 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
         ),
       );
       navigator.pop();
+    } on AuthRequiredException {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      // Show admin key dialog and retry on success
+      final success = await AdminKeyDialog.show(context, ApiService());
+      if (success && mounted) {
+        _addToCollection(); // Retry after authentication
+      }
     } catch (e) {
       if (!mounted) return;
       messenger.showSnackBar(
@@ -806,6 +824,13 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
         ),
       );
       navigator.pop();
+    } on AuthRequiredException {
+      if (!mounted) return;
+      // Show admin key dialog and retry on success
+      final success = await AdminKeyDialog.show(context, ApiService());
+      if (success && mounted) {
+        _deleteItem(); // Retry after authentication
+      }
     } catch (e) {
       if (!mounted) return;
       messenger.showSnackBar(
