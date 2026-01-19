@@ -50,6 +50,10 @@ class _CameraScreenState extends State<CameraScreen> {
   bool _isQualityAcceptable = false;
   Timer? _qualityCheckTimer;
 
+  // Mutex flag to prevent concurrent takePicture() calls
+  // The camera package throws errors if you capture while another capture is in progress
+  bool _isTakingPicture = false;
+
   @override
   void initState() {
     super.initState();
@@ -141,9 +145,13 @@ class _CameraScreenState extends State<CameraScreen> {
   Future<void> _checkQuality() async {
     if (_controller == null ||
         !_controller!.value.isInitialized ||
-        _isProcessing) {
+        _isProcessing ||
+        _isTakingPicture) {
       return;
     }
+
+    // Set flag before any async work to prevent race conditions
+    _isTakingPicture = true;
 
     try {
       // Take a preview image for quality analysis
@@ -163,20 +171,43 @@ class _CameraScreenState extends State<CameraScreen> {
       }
     } catch (e) {
       // Ignore errors during quality checking
+    } finally {
+      _isTakingPicture = false;
     }
   }
 
   Future<void> _captureAndProcess() async {
     if (_controller == null ||
         !_controller!.value.isInitialized ||
-        _isProcessing) {
+        _isProcessing ||
+        _isTakingPicture) {
       return;
     }
 
     setState(() => _isProcessing = true);
 
+    // Set flag before capture to prevent quality check from interfering
+    _isTakingPicture = true;
+
+    XFile image;
     try {
-      final image = await _controller!.takePicture();
+      image = await _controller!.takePicture();
+    } catch (e) {
+      // Capture failed (could be concurrent capture attempt or hardware issue)
+      _isTakingPicture = false;
+      if (mounted) {
+        setState(() => _isProcessing = false);
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to capture image: $e')));
+      }
+      return;
+    }
+    // Release capture lock immediately after takePicture completes
+    // This allows quality checking to resume while we process the image
+    _isTakingPicture = false;
+
+    try {
       final imageBytes = await File(image.path).readAsBytes();
       final imageBytesAsList = imageBytes.toList();
 
