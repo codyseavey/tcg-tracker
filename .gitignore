@@ -79,8 +79,9 @@ identifier/analyze_*.py
 identifier/test_prod_*.py
 identifier/validate_*.py
 
-# Nested module directories (development artifacts)
-identifier/identifier/
+# Setid module directories (development artifacts)
+identifier/identifier/setid/
+identifier/setid/
 
 # Data directories (generated/downloaded data)
 data/

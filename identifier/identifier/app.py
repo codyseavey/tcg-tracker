@@ -20,7 +20,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from identifier.ocr_engine import (
+from .ocr_engine import (
     init_ocr_engine,
     downscale_image,
     get_gpu_info,
