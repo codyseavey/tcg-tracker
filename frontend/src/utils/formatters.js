@@ -40,14 +40,24 @@ export function isPriceStale(cardOrItem) {
 }
 
 /**
- * Calculate the value of a collection item (respecting foil status and quantity).
- * @param {object} item - Collection item with card, quantity, foil properties
+ * Check if a printing type uses foil pricing.
+ * @param {string} printing - The printing type (Normal, Foil, 1st Edition, etc.)
+ * @returns {boolean} True if this printing type should use foil pricing
+ */
+export function isFoilPrinting(printing) {
+  return ['Foil', 'Reverse Holofoil'].includes(printing)
+}
+
+/**
+ * Calculate the value of a collection item (respecting printing type and quantity).
+ * @param {object} item - Collection item with card, quantity, printing properties
  * @returns {number} Total value
  */
 export function getItemValue(item) {
   const card = item?.card || item
   const quantity = item?.quantity || 1
-  if (item?.foil && card?.price_foil_usd) {
+  const useFoilPrice = isFoilPrinting(item?.printing)
+  if (useFoilPrice && card?.price_foil_usd) {
     return card.price_foil_usd * quantity
   }
   return (card?.price_usd || 0) * quantity

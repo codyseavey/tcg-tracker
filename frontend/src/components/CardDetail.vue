@@ -19,11 +19,19 @@ const emit = defineEmits(['close', 'add', 'update', 'remove', 'priceUpdated'])
 const card = computed(() => props.item.card || props.item)
 const quantity = ref(props.item.quantity || 1)
 const condition = ref(props.item.condition || 'NM')
-const foil = ref(props.item.foil || false)
-const firstEdition = ref(props.item.first_edition || false)
+const printing = ref(props.item.printing || 'Normal')
 const refreshingPrice = ref(false)
 const priceError = ref(null)
+const priceMessage = ref(null)
 const showScannedImage = ref(false)
+
+const printingOptions = [
+  { value: 'Normal', label: 'Normal' },
+  { value: 'Foil', label: 'Foil / Holo' },
+  { value: '1st Edition', label: '1st Edition' },
+  { value: 'Reverse Holofoil', label: 'Reverse Holo' },
+  { value: 'Unlimited', label: 'Unlimited' }
+]
 
 const hasScannedImage = computed(() => props.item.scanned_image_path)
 const scannedImageUrl = computed(() => {
@@ -51,11 +59,15 @@ const refreshPrice = async () => {
 
   refreshingPrice.value = true
   priceError.value = null
+  priceMessage.value = null
 
   try {
     const result = await priceService.refreshCardPrice(card.value.id)
-    if (result.card) {
-      // Update the card's price data
+    // Price refresh is now queued, not immediate
+    if (result.queue_position) {
+      priceMessage.value = `Queued for refresh (position ${result.queue_position})`
+    } else if (result.card) {
+      // Backward compat: if card is returned, update it
       card.value.price_usd = result.card.price_usd
       card.value.price_foil_usd = result.card.price_foil_usd
       card.value.price_updated_at = result.card.price_updated_at
@@ -66,7 +78,7 @@ const refreshPrice = async () => {
     if (err.response?.status === 429) {
       priceError.value = 'Daily quota exceeded'
     } else {
-      priceError.value = 'Failed to refresh price'
+      priceError.value = 'Failed to queue refresh'
     }
   } finally {
     refreshingPrice.value = false
@@ -78,8 +90,7 @@ const handleAdd = () => {
     cardId: card.value.id,
     quantity: quantity.value,
     condition: condition.value,
-    foil: foil.value,
-    firstEdition: firstEdition.value
+    printing: printing.value
   })
 }
 
@@ -88,8 +99,7 @@ const handleUpdate = () => {
     id: props.item.id,
     quantity: quantity.value,
     condition: condition.value,
-    foil: foil.value,
-    firstEdition: firstEdition.value
+    printing: printing.value
   })
 }
 
@@ -198,6 +208,9 @@ const handleRemove = () => {
                 </button>
               </div>
             </div>
+            <div v-if="priceMessage" class="text-blue-500 text-sm">
+              {{ priceMessage }}
+            </div>
             <div v-if="priceError" class="text-red-500 text-sm">
               {{ priceError }}
             </div>
@@ -223,23 +236,13 @@ const handleRemove = () => {
                 </option>
               </select>
             </div>
-            <div class="flex items-center">
-              <input
-                v-model="foil"
-                type="checkbox"
-                :id="'foil-' + card.id"
-                class="rounded border-gray-300 dark:border-gray-600 text-blue-600 mr-2"
-              />
-              <label :for="'foil-' + card.id" class="text-sm font-medium text-gray-700 dark:text-gray-300">Foil</label>
-            </div>
-            <div class="flex items-center">
-              <input
-                v-model="firstEdition"
-                type="checkbox"
-                :id="'first-edition-' + card.id"
-                class="rounded border-gray-300 dark:border-gray-600 text-amber-600 mr-2"
-              />
-              <label :for="'first-edition-' + card.id" class="text-sm font-medium text-gray-700 dark:text-gray-300">1st Edition</label>
+            <div>
+              <label :for="'printing-' + card.id" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Printing</label>
+              <select :id="'printing-' + card.id" v-model="printing" class="w-full border dark:border-gray-600 rounded-lg px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white">
+                <option v-for="p in printingOptions" :key="p.value" :value="p.value">
+                  {{ p.label }}
+                </option>
+              </select>
             </div>
           </div>
 

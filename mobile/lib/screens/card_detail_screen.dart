@@ -24,8 +24,7 @@ class CardDetailScreen extends StatefulWidget {
 class _CardDetailScreenState extends State<CardDetailScreen> {
   late int _quantity;
   late String _condition;
-  late bool _foil;
-  late bool _firstEdition;
+  late PrintingType _printing;
   bool _loading = false;
   bool _priceRefreshing = false;
   bool _showScannedImage = false;
@@ -38,13 +37,44 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
   List<String> get _conditions => CardConditions.codes;
   Map<String, String> get _conditionLabels => CardConditions.labels;
 
+  // Helper to get a short badge label for printing type
+  String _printingBadgeLabel(PrintingType printing) {
+    switch (printing) {
+      case PrintingType.foil:
+        return 'FOIL';
+      case PrintingType.firstEdition:
+        return '1ST ED';
+      case PrintingType.reverseHolofoil:
+        return 'REV HOLO';
+      case PrintingType.unlimited:
+        return 'UNLTD';
+      case PrintingType.normal:
+        return '';
+    }
+  }
+
+  // Helper to get display name for printing type dropdown
+  String _printingDisplayName(PrintingType printing) {
+    switch (printing) {
+      case PrintingType.normal:
+        return 'Normal';
+      case PrintingType.foil:
+        return 'Foil / Holo';
+      case PrintingType.firstEdition:
+        return '1st Edition';
+      case PrintingType.reverseHolofoil:
+        return 'Reverse Holo';
+      case PrintingType.unlimited:
+        return 'Unlimited';
+    }
+  }
+
   @override
   void initState() {
     super.initState();
     _quantity = widget.collectionItem?.quantity ?? 1;
     _condition = widget.collectionItem?.condition ?? 'NM';
-    _foil = widget.collectionItem?.foil ?? false;
-    _firstEdition = widget.collectionItem?.firstEdition ?? false;
+    _printing = widget.collectionItem?.printing ?? PrintingType.normal;
   }
 
   @override
@@ -262,35 +292,26 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
                 ),
               ),
             ),
-            if (_foil) ...[
+            if (_printing != PrintingType.normal) ...[
               const SizedBox(width: 8),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Colors.purple.shade300, Colors.blue.shade300],
-                  ),
+                  gradient: _printing.usesFoilPricing
+                      ? LinearGradient(
+                          colors: [
+                            Colors.purple.shade300,
+                            Colors.blue.shade300,
+                          ],
+                        )
+                      : null,
+                  color: _printing.usesFoilPricing
+                      ? null
+                      : Colors.amber.shade700,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  'FOIL',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
-            if (_firstEdition) ...[
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.amber.shade700,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  '1ST ED',
+                  _printingBadgeLabel(_printing),
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -517,20 +538,22 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
         ),
         const SizedBox(height: 16),
 
-        // Foil toggle
-        SwitchListTile(
-          title: const Text('Foil'),
-          value: _foil,
-          onChanged: (value) => setState(() => _foil = value),
-          contentPadding: EdgeInsets.zero,
-        ),
-
-        // First Edition toggle
-        SwitchListTile(
-          title: const Text('1st Edition'),
-          value: _firstEdition,
-          onChanged: (value) => setState(() => _firstEdition = value),
-          contentPadding: EdgeInsets.zero,
+        // Printing type
+        DropdownButtonFormField<PrintingType>(
+          value: _printing,
+          decoration: InputDecoration(
+            labelText: 'Printing',
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          items: PrintingType.values.map((p) {
+            return DropdownMenuItem(
+              value: p,
+              child: Text(_printingDisplayName(p)),
+            );
+          }).toList(),
+          onChanged: (value) {
+            if (value != null) setState(() => _printing = value);
+          },
         ),
         const SizedBox(height: 24),
 
@@ -607,20 +630,22 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
         ),
         const SizedBox(height: 16),
 
-        // Foil toggle
-        SwitchListTile(
-          title: const Text('Foil'),
-          value: _foil,
-          onChanged: (value) => setState(() => _foil = value),
-          contentPadding: EdgeInsets.zero,
-        ),
-
-        // First Edition toggle
-        SwitchListTile(
-          title: const Text('1st Edition'),
-          value: _firstEdition,
-          onChanged: (value) => setState(() => _firstEdition = value),
-          contentPadding: EdgeInsets.zero,
+        // Printing type
+        DropdownButtonFormField<PrintingType>(
+          value: _printing,
+          decoration: InputDecoration(
+            labelText: 'Printing',
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          items: PrintingType.values.map((p) {
+            return DropdownMenuItem(
+              value: p,
+              child: Text(_printingDisplayName(p)),
+            );
+          }).toList(),
+          onChanged: (value) {
+            if (value != null) setState(() => _printing = value);
+          },
         ),
         const SizedBox(height: 24),
 
@@ -651,8 +676,7 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
         widget.collectionItem!.id,
         quantity: _quantity,
         condition: _condition,
-        foil: _foil,
-        firstEdition: _firstEdition,
+        printing: _printing,
       );
       if (!mounted) return;
       messenger.showSnackBar(
@@ -688,8 +712,7 @@ class _CardDetailScreenState extends State<CardDetailScreen> {
         _card.id,
         quantity: _quantity,
         condition: _condition,
-        foil: _foil,
-        firstEdition: _firstEdition,
+        printing: _printing,
       );
       if (!mounted) return;
       messenger.showSnackBar(

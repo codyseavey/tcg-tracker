@@ -14,18 +14,21 @@ import (
 const (
 	// defaultBatchSize is the number of cards to update per batch
 	defaultBatchSize = 20
-	// apiRequestDelay is the delay between API requests
-	apiRequestDelay = 100 * time.Millisecond
 )
 
 type PriceWorker struct {
 	priceService   *PriceService
+	justTCG        *JustTCGService
 	pokemonService *PokemonHybridService
 	updateInterval time.Duration
 	mu             sync.RWMutex
 
 	// Batch config
 	batchSize int
+
+	// Priority queue for user-requested refreshes
+	urgentQueue []string
+	urgentMu    sync.Mutex
 
 	// Stats
 	cardsUpdatedToday int
@@ -38,15 +41,45 @@ type PriceStatus struct {
 	CardsUpdatedToday        int       `json:"cards_updated_today"`
 	BatchSize                int       `json:"batch_size"`
 	JustTCGRequestsRemaining int       `json:"justtcg_requests_remaining"`
+	QueueSize                int       `json:"queue_size"`
 }
 
-func NewPriceWorker(priceService *PriceService, pokemonService *PokemonHybridService, _ int) *PriceWorker {
+func NewPriceWorker(priceService *PriceService, pokemonService *PokemonHybridService, justTCG *JustTCGService) *PriceWorker {
 	return &PriceWorker{
 		priceService:   priceService,
+		justTCG:        justTCG,
 		pokemonService: pokemonService,
 		batchSize:      defaultBatchSize,
 		updateInterval: 1 * time.Hour,
 	}
+}
+
+// QueueRefresh adds a card to the high-priority refresh queue
+func (w *PriceWorker) QueueRefresh(cardID string) int {
+	w.urgentMu.Lock()
+	defer w.urgentMu.Unlock()
+
+	// Avoid duplicates
+	for _, id := range w.urgentQueue {
+		if id == cardID {
+			// Return current position (1-indexed)
+			for i, qid := range w.urgentQueue {
+				if qid == cardID {
+					return i + 1
+				}
+			}
+		}
+	}
+	w.urgentQueue = append(w.urgentQueue, cardID)
+	log.Printf("Price worker: queued refresh for card %s (queue size: %d)", cardID, len(w.urgentQueue))
+	return len(w.urgentQueue)
+}
+
+// GetQueueSize returns current urgent queue size
+func (w *PriceWorker) GetQueueSize() int {
+	w.urgentMu.Lock()
+	defer w.urgentMu.Unlock()
+	return len(w.urgentQueue)
 }
 
 // Start begins the background price update worker
@@ -78,39 +111,181 @@ func (w *PriceWorker) Start(ctx context.Context) {
 	}
 }
 
-// UpdateBatch updates a batch of cards with the oldest prices
+// UpdateBatch updates a batch of cards with priority ordering:
+// 1. User-requested refreshes
+// 2. Collection cards without prices
+// 3. Collection cards with oldest prices
 func (w *PriceWorker) UpdateBatch() (updated int, err error) {
 	db := database.GetDB()
+	var cardsToUpdate []models.Card
+	var cardIDs []string
 
-	// Get cards that need price updates
-	// Priority: cards in collection with oldest/no prices (both Pokemon and MTG)
-	var cards []models.Card
+	// Priority 1: User-requested refreshes
+	w.urgentMu.Lock()
+	urgentIDs := w.urgentQueue
+	if len(urgentIDs) > w.batchSize {
+		urgentIDs = urgentIDs[:w.batchSize]
+		w.urgentQueue = w.urgentQueue[w.batchSize:]
+	} else {
+		w.urgentQueue = nil
+	}
+	w.urgentMu.Unlock()
 
-	// Get cards in collection with no price or oldest prices
-	db.Raw(`
-		SELECT c.* FROM cards c
-		INNER JOIN collection_items ci ON ci.card_id = c.id
-		ORDER BY c.price_updated_at ASC NULLS FIRST
-		LIMIT ?
-	`, w.batchSize).Scan(&cards)
-
-	// If we don't have enough, add cached cards not in collection
-	if len(cards) < w.batchSize {
-		remaining := w.batchSize - len(cards)
-		var moreCards []models.Card
-		db.Order("price_updated_at ASC NULLS FIRST").
-			Limit(remaining).
-			Offset(len(cards)).
-			Find(&moreCards)
-		cards = append(cards, moreCards...)
+	if len(urgentIDs) > 0 {
+		var urgentCards []models.Card
+		db.Where("id IN ?", urgentIDs).Find(&urgentCards)
+		cardsToUpdate = append(cardsToUpdate, urgentCards...)
+		for _, c := range urgentCards {
+			cardIDs = append(cardIDs, c.ID)
+		}
+		log.Printf("Price worker: processing %d urgent refresh requests", len(urgentCards))
 	}
 
-	if len(cards) == 0 {
+	remaining := w.batchSize - len(cardsToUpdate)
+
+	// Priority 2: Collection cards without prices
+	if remaining > 0 {
+		var noPriceCards []models.Card
+		query := `
+			SELECT DISTINCT c.* FROM cards c
+			INNER JOIN collection_items ci ON ci.card_id = c.id
+			LEFT JOIN card_prices cp ON cp.card_id = c.id
+			WHERE cp.id IS NULL
+		`
+		if len(cardIDs) > 0 {
+			db.Raw(query+" AND c.id NOT IN (?) LIMIT ?", cardIDs, remaining).Scan(&noPriceCards)
+		} else {
+			db.Raw(query+" LIMIT ?", remaining).Scan(&noPriceCards)
+		}
+
+		cardsToUpdate = append(cardsToUpdate, noPriceCards...)
+		for _, c := range noPriceCards {
+			cardIDs = append(cardIDs, c.ID)
+		}
+		remaining -= len(noPriceCards)
+	}
+
+	// Priority 3: Collection cards with oldest prices
+	if remaining > 0 {
+		var oldestCards []models.Card
+		query := `
+			SELECT c.* FROM cards c
+			INNER JOIN collection_items ci ON ci.card_id = c.id
+		`
+		if len(cardIDs) > 0 {
+			db.Raw(query+" WHERE c.id NOT IN (?) ORDER BY c.price_updated_at ASC NULLS FIRST LIMIT ?",
+				cardIDs, remaining).Scan(&oldestCards)
+		} else {
+			db.Raw(query+" ORDER BY c.price_updated_at ASC NULLS FIRST LIMIT ?",
+				remaining).Scan(&oldestCards)
+		}
+		cardsToUpdate = append(cardsToUpdate, oldestCards...)
+	}
+
+	if len(cardsToUpdate) == 0 {
 		log.Println("Price worker: no cards to update")
 		return 0, nil
 	}
 
-	log.Printf("Price worker: updating prices for %d cards", len(cards))
+	log.Printf("Price worker: updating prices for %d cards", len(cardsToUpdate))
+
+	// Use batch update if JustTCG is configured
+	if w.justTCG != nil {
+		return w.batchUpdatePrices(cardsToUpdate)
+	}
+
+	// Fallback to individual updates
+	return w.individualUpdatePrices(cardsToUpdate)
+}
+
+// batchUpdatePrices uses the batch API to update all cards at once
+func (w *PriceWorker) batchUpdatePrices(cards []models.Card) (int, error) {
+	// Build lookup requests
+	lookups := make([]CardLookup, len(cards))
+	cardMap := make(map[string]*models.Card)
+
+	for i, card := range cards {
+		gameStr := "pokemon"
+		if card.Game == models.GameMTG {
+			gameStr = "magic-the-gathering"
+		}
+
+		lookups[i] = CardLookup{
+			CardID: card.ID,
+			Name:   card.Name,
+			Set:    card.SetCode,
+			Game:   gameStr,
+		}
+		cardMap[card.ID] = &cards[i]
+		// Also map by name for matching
+		cardMap[card.Name] = &cards[i]
+	}
+
+	// Single batch request
+	results, err := w.justTCG.BatchGetPrices(lookups)
+	if err != nil {
+		log.Printf("Price worker: batch request failed: %v", err)
+		// Fallback to individual updates
+		return w.individualUpdatePrices(cards)
+	}
+
+	// Save results
+	updated := 0
+	db := database.GetDB()
+
+	for key, prices := range results {
+		if len(prices) == 0 {
+			continue
+		}
+
+		// Find the card this matches
+		card, ok := cardMap[key]
+		if !ok {
+			// Try to find by name match
+			for _, c := range cards {
+				if c.Name == key {
+					card = &c
+					break
+				}
+			}
+		}
+
+		if card != nil {
+			// Set card ID on all prices
+			for i := range prices {
+				prices[i].CardID = card.ID
+			}
+			w.priceService.SaveCardPrices(card.ID, prices)
+
+			// Update base card prices for backward compatibility
+			for _, p := range prices {
+				if p.Condition == models.PriceConditionNM {
+					if p.Printing.IsFoilVariant() {
+						card.PriceFoilUSD = p.PriceUSD
+					} else {
+						card.PriceUSD = p.PriceUSD
+					}
+					card.PriceUpdatedAt = p.PriceUpdatedAt
+					card.PriceSource = p.Source
+				}
+			}
+			db.Save(card)
+			updated++
+		}
+	}
+
+	w.mu.Lock()
+	w.cardsUpdatedToday += updated
+	w.lastUpdateTime = time.Now()
+	w.mu.Unlock()
+
+	log.Printf("Price worker: batch updated %d card prices", updated)
+	return updated, nil
+}
+
+// individualUpdatePrices updates cards one at a time (fallback when batch fails)
+func (w *PriceWorker) individualUpdatePrices(cards []models.Card) (int, error) {
+	updated := 0
 
 	for _, card := range cards {
 		pricesUpdated, err := w.priceService.UpdateCardPrices(&card)
@@ -125,7 +300,7 @@ func (w *PriceWorker) UpdateBatch() (updated int, err error) {
 		}
 
 		// Small delay between requests to be nice to the APIs
-		time.Sleep(apiRequestDelay)
+		time.Sleep(100 * time.Millisecond)
 	}
 
 	w.mu.Lock()
@@ -133,37 +308,7 @@ func (w *PriceWorker) UpdateBatch() (updated int, err error) {
 	w.lastUpdateTime = time.Now()
 	w.mu.Unlock()
 
-	log.Printf("Price worker: updated %d card prices", updated)
 	return updated, nil
-}
-
-// UpdateCard updates a single card's price (for manual refresh)
-func (w *PriceWorker) UpdateCard(cardID string) (*models.Card, error) {
-	db := database.GetDB()
-
-	var card models.Card
-	if err := db.First(&card, "id = ?", cardID).Error; err != nil {
-		return nil, err
-	}
-
-	pricesUpdated, err := w.priceService.UpdateCardPrices(&card)
-	if err != nil {
-		return nil, err
-	}
-
-	// Reload the card to get updated prices
-	if err := db.First(&card, "id = ?", cardID).Error; err != nil {
-		return nil, err
-	}
-
-	w.mu.Lock()
-	if pricesUpdated > 0 {
-		w.cardsUpdatedToday++
-	}
-	w.mu.Unlock()
-
-	log.Printf("Price worker: manually refreshed %d prices for %s", pricesUpdated, card.Name)
-	return &card, nil
 }
 
 // GetStatus returns the current status
@@ -171,13 +316,12 @@ func (w *PriceWorker) GetStatus() PriceStatus {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 
-	now := time.Now()
-
 	return PriceStatus{
 		LastUpdateTime:           w.lastUpdateTime,
-		NextUpdateTime:           now.Add(w.updateInterval),
+		NextUpdateTime:           w.lastUpdateTime.Add(w.updateInterval),
 		CardsUpdatedToday:        w.cardsUpdatedToday,
 		BatchSize:                w.batchSize,
 		JustTCGRequestsRemaining: w.priceService.GetJustTCGRequestsRemaining(),
+		QueueSize:                w.GetQueueSize(),
 	}
 }

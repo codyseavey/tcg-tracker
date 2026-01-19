@@ -6,7 +6,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:image/image.dart' as img;
 import '../models/card.dart';
-import '../models/collection_item.dart';
+import '../models/collection_item.dart' show CollectionItem, PrintingType;
 import '../models/collection_stats.dart';
 import '../models/price_status.dart';
 import 'image_analysis_service.dart';
@@ -144,8 +144,7 @@ class ApiService {
     String cardId, {
     int quantity = 1,
     String condition = 'NM',
-    bool foil = false,
-    bool firstEdition = false,
+    PrintingType printing = PrintingType.normal,
     List<int>? scannedImageBytes,
   }) async {
     final serverUrl = await getServerUrl();
@@ -155,8 +154,7 @@ class ApiService {
       'card_id': cardId,
       'quantity': quantity,
       'condition': condition,
-      'foil': foil,
-      'first_edition': firstEdition,
+      'printing': printing.value,
     };
 
     // Include scanned image if provided
@@ -234,8 +232,7 @@ class ApiService {
     int id, {
     int? quantity,
     String? condition,
-    bool? foil,
-    bool? firstEdition,
+    PrintingType? printing,
     String? notes,
   }) async {
     final serverUrl = await getServerUrl();
@@ -244,8 +241,7 @@ class ApiService {
     final body = <String, dynamic>{};
     if (quantity != null) body['quantity'] = quantity;
     if (condition != null) body['condition'] = condition;
-    if (foil != null) body['foil'] = foil;
-    if (firstEdition != null) body['first_edition'] = firstEdition;
+    if (printing != null) body['printing'] = printing.value;
     if (notes != null) body['notes'] = notes;
 
     final response = await _httpClient

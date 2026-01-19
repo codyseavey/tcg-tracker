@@ -25,9 +25,9 @@ const handleSelect = (card) => {
   selectedCard.value = card
 }
 
-const handleAdd = async ({ cardId, quantity, condition, foil }) => {
+const handleAdd = async ({ cardId, quantity, condition, printing }) => {
   try {
-    await store.addToCollection(cardId, { quantity, condition, foil })
+    await store.addToCollection(cardId, { quantity, condition, printing })
     message.value = 'Card added to collection!'
     selectedCard.value = null
     setTimeout(() => { message.value = '' }, 3000)

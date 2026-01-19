@@ -11,7 +11,7 @@ class CollectionProvider extends ChangeNotifier {
   final ApiService _apiService;
 
   CollectionProvider({ApiService? apiService})
-      : _apiService = apiService ?? ApiService();
+    : _apiService = apiService ?? ApiService();
 
   // Collection state
   List<CollectionItem> _items = [];
@@ -78,8 +78,10 @@ class CollectionProvider extends ChangeNotifier {
         filtered.sort((a, b) => b.addedAt.compareTo(a.addedAt));
         break;
       case SortOption.name:
-        filtered.sort((a, b) =>
-            a.card.name.toLowerCase().compareTo(b.card.name.toLowerCase()));
+        filtered.sort(
+          (a, b) =>
+              a.card.name.toLowerCase().compareTo(b.card.name.toLowerCase()),
+        );
         break;
       case SortOption.value:
         filtered.sort((a, b) => b.totalValue.compareTo(a.totalValue));
@@ -131,16 +133,14 @@ class CollectionProvider extends ChangeNotifier {
     String cardId, {
     int quantity = 1,
     String condition = 'NM',
-    bool foil = false,
-    bool firstEdition = false,
+    PrintingType printing = PrintingType.normal,
   }) async {
     try {
       final item = await _apiService.addToCollection(
         cardId,
         quantity: quantity,
         condition: condition,
-        foil: foil,
-        firstEdition: firstEdition,
+        printing: printing,
       );
       // Add to local list or update existing
       final existingIndex = _items.indexWhere((i) => i.id == item.id);
@@ -161,8 +161,7 @@ class CollectionProvider extends ChangeNotifier {
     int id, {
     int? quantity,
     String? condition,
-    bool? foil,
-    bool? firstEdition,
+    PrintingType? printing,
     String? notes,
   }) async {
     try {
@@ -170,8 +169,7 @@ class CollectionProvider extends ChangeNotifier {
         id,
         quantity: quantity,
         condition: condition,
-        foil: foil,
-        firstEdition: firstEdition,
+        printing: printing,
         notes: notes,
       );
       final index = _items.indexWhere((i) => i.id == id);
@@ -269,10 +267,6 @@ class CollectionProvider extends ChangeNotifier {
 
   /// Initialize the provider by loading data
   Future<void> initialize() async {
-    await Future.wait([
-      fetchCollection(),
-      fetchStats(),
-      fetchPriceStatus(),
-    ]);
+    await Future.wait([fetchCollection(), fetchStats(), fetchPriceStatus()]);
   }
 }

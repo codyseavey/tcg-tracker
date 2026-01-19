@@ -31,17 +31,17 @@ type Card struct {
 	Prices         []CardPrice `json:"prices,omitempty" gorm:"foreignKey:CardID;references:ID"`
 }
 
-// GetPrice returns the price for a specific condition and foil status
+// GetPrice returns the price for a specific condition and printing type
 // Falls back to the base PriceUSD/PriceFoilUSD if no condition-specific price exists
-func (c *Card) GetPrice(condition PriceCondition, foil bool) float64 {
+func (c *Card) GetPrice(condition PriceCondition, printing PrintingType) float64 {
 	// Look for condition-specific price
 	for _, p := range c.Prices {
-		if p.Condition == condition && p.Foil == foil {
+		if p.Condition == condition && p.Printing == printing {
 			return p.PriceUSD
 		}
 	}
 	// Fallback to base price
-	if foil {
+	if printing.IsFoilVariant() {
 		return c.PriceFoilUSD
 	}
 	return c.PriceUSD

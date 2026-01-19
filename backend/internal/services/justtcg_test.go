@@ -23,19 +23,19 @@ func TestNewJustTCGService(t *testing.T) {
 	}
 }
 
-func TestRateLimiting(t *testing.T) {
+func TestDailyLimiting(t *testing.T) {
 	svc := NewJustTCGService("", 3)
 
-	// Should allow 3 requests
+	// Should allow 3 requests via checkDailyLimit
 	for i := 0; i < 3; i++ {
-		if !svc.checkRateLimit() {
+		if !svc.checkDailyLimit() {
 			t.Errorf("Request %d should be allowed", i+1)
 		}
 	}
 
 	// 4th request should be blocked
-	if svc.checkRateLimit() {
-		t.Error("4th request should be blocked")
+	if svc.checkDailyLimit() {
+		t.Error("4th request should be blocked by daily limit")
 	}
 
 	// Verify remaining is 0

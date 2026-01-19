@@ -32,11 +32,11 @@ func NewPriceService(justTCG *JustTCGService, tcgdex *TCGdexService, scryfall *S
 	}
 }
 
-// GetPrice returns the price for a specific card, condition, and foil status
+// GetPrice returns the price for a specific card, condition, and printing type
 // Fallback order: DB cache -> JustTCG -> TCGdex/Scryfall -> stale cache
-func (s *PriceService) GetPrice(card *models.Card, condition models.PriceCondition, foil bool) (float64, string, error) {
+func (s *PriceService) GetPrice(card *models.Card, condition models.PriceCondition, printing models.PrintingType) (float64, string, error) {
 	// 1. Check database cache for fresh condition-specific price
-	cachedPrice, err := s.getCachedPrice(card.ID, condition, foil)
+	cachedPrice, err := s.getCachedPrice(card.ID, condition, printing)
 	if err == nil && cachedPrice != nil && s.isFresh(cachedPrice.PriceUpdatedAt) {
 		return cachedPrice.PriceUSD, cachedPrice.Source, nil
 	}
@@ -50,7 +50,7 @@ func (s *PriceService) GetPrice(card *models.Card, condition models.PriceConditi
 
 			// Return the requested price
 			for _, p := range prices {
-				if p.Condition == condition && p.Foil == foil {
+				if p.Condition == condition && p.Printing == printing {
 					return p.PriceUSD, "justtcg", nil
 				}
 			}
@@ -58,7 +58,7 @@ func (s *PriceService) GetPrice(card *models.Card, condition models.PriceConditi
 			// If exact condition not found, try NM as fallback
 			if condition != models.PriceConditionNM {
 				for _, p := range prices {
-					if p.Condition == models.PriceConditionNM && p.Foil == foil {
+					if p.Condition == models.PriceConditionNM && p.Printing == printing {
 						return p.PriceUSD, "justtcg", nil
 					}
 				}
@@ -71,13 +71,14 @@ func (s *PriceService) GetPrice(card *models.Card, condition models.PriceConditi
 	// 3. Fallback to game-specific APIs (only NM prices)
 	var fallbackPrice float64
 	var fallbackSource string
+	isFoilVariant := printing.IsFoilVariant()
 
 	switch card.Game {
 	case models.GamePokemon:
 		if s.tcgdex != nil {
 			priceUSD, priceFoilUSD, err := s.tcgdex.GetCardPrice(card.ID)
 			if err == nil {
-				if foil && priceFoilUSD > 0 {
+				if isFoilVariant && priceFoilUSD > 0 {
 					fallbackPrice = priceFoilUSD
 				} else if priceUSD > 0 {
 					fallbackPrice = priceUSD
@@ -91,7 +92,7 @@ func (s *PriceService) GetPrice(card *models.Card, condition models.PriceConditi
 		if s.scryfall != nil {
 			scryfallCard, err := s.scryfall.GetCard(card.ID)
 			if err == nil && scryfallCard != nil {
-				if foil && scryfallCard.PriceFoilUSD > 0 {
+				if isFoilVariant && scryfallCard.PriceFoilUSD > 0 {
 					fallbackPrice = scryfallCard.PriceFoilUSD
 				} else if scryfallCard.PriceUSD > 0 {
 					fallbackPrice = scryfallCard.PriceUSD
@@ -110,7 +111,7 @@ func (s *PriceService) GetPrice(card *models.Card, condition models.PriceConditi
 			{
 				CardID:         card.ID,
 				Condition:      models.PriceConditionNM,
-				Foil:           foil,
+				Printing:       printing,
 				PriceUSD:       fallbackPrice,
 				Source:         fallbackSource,
 				PriceUpdatedAt: &now,
@@ -125,7 +126,7 @@ func (s *PriceService) GetPrice(card *models.Card, condition models.PriceConditi
 	}
 
 	// 5. Fallback to card's base price (NM assumption)
-	if foil && card.PriceFoilUSD > 0 {
+	if isFoilVariant && card.PriceFoilUSD > 0 {
 		return card.PriceFoilUSD, "cached", nil
 	}
 	if card.PriceUSD > 0 {
@@ -180,7 +181,7 @@ func (s *PriceService) GetAllConditionPrices(card *models.Card) ([]models.CardPr
 					fallbackPrices = append(fallbackPrices, models.CardPrice{
 						CardID:         card.ID,
 						Condition:      models.PriceConditionNM,
-						Foil:           false,
+						Printing:       models.PrintingNormal,
 						PriceUSD:       priceUSD,
 						Source:         "tcgdex",
 						PriceUpdatedAt: &now,
@@ -190,7 +191,7 @@ func (s *PriceService) GetAllConditionPrices(card *models.Card) ([]models.CardPr
 					fallbackPrices = append(fallbackPrices, models.CardPrice{
 						CardID:         card.ID,
 						Condition:      models.PriceConditionNM,
-						Foil:           true,
+						Printing:       models.PrintingFoil,
 						PriceUSD:       priceFoilUSD,
 						Source:         "tcgdex",
 						PriceUpdatedAt: &now,
@@ -206,7 +207,7 @@ func (s *PriceService) GetAllConditionPrices(card *models.Card) ([]models.CardPr
 					fallbackPrices = append(fallbackPrices, models.CardPrice{
 						CardID:         card.ID,
 						Condition:      models.PriceConditionNM,
-						Foil:           false,
+						Printing:       models.PrintingNormal,
 						PriceUSD:       scryfallCard.PriceUSD,
 						Source:         "scryfall",
 						PriceUpdatedAt: &now,
@@ -216,7 +217,7 @@ func (s *PriceService) GetAllConditionPrices(card *models.Card) ([]models.CardPr
 					fallbackPrices = append(fallbackPrices, models.CardPrice{
 						CardID:         card.ID,
 						Condition:      models.PriceConditionNM,
-						Foil:           true,
+						Printing:       models.PrintingFoil,
 						PriceUSD:       scryfallCard.PriceFoilUSD,
 						Source:         "scryfall",
 						PriceUpdatedAt: &now,
@@ -242,7 +243,7 @@ func (s *PriceService) GetAllConditionPrices(card *models.Card) ([]models.CardPr
 		basePrices = append(basePrices, models.CardPrice{
 			CardID:         card.ID,
 			Condition:      models.PriceConditionNM,
-			Foil:           false,
+			Printing:       models.PrintingNormal,
 			PriceUSD:       card.PriceUSD,
 			Source:         "cached",
 			PriceUpdatedAt: card.PriceUpdatedAt,
@@ -252,7 +253,7 @@ func (s *PriceService) GetAllConditionPrices(card *models.Card) ([]models.CardPr
 		basePrices = append(basePrices, models.CardPrice{
 			CardID:         card.ID,
 			Condition:      models.PriceConditionNM,
-			Foil:           true,
+			Printing:       models.PrintingFoil,
 			PriceUSD:       card.PriceFoilUSD,
 			Source:         "cached",
 			PriceUpdatedAt: card.PriceUpdatedAt,
@@ -274,7 +275,7 @@ func (s *PriceService) UpdateCardPrices(card *models.Card) (int, error) {
 	if len(prices) > 0 {
 		for _, p := range prices {
 			if p.Condition == models.PriceConditionNM {
-				if p.Foil {
+				if p.Printing.IsFoilVariant() {
 					card.PriceFoilUSD = p.PriceUSD
 				} else {
 					card.PriceUSD = p.PriceUSD
@@ -290,13 +291,18 @@ func (s *PriceService) UpdateCardPrices(card *models.Card) (int, error) {
 }
 
 // getCachedPrice retrieves a cached price from the database
-func (s *PriceService) getCachedPrice(cardID string, condition models.PriceCondition, foil bool) (*models.CardPrice, error) {
+func (s *PriceService) getCachedPrice(cardID string, condition models.PriceCondition, printing models.PrintingType) (*models.CardPrice, error) {
 	var price models.CardPrice
-	err := s.db.Where("card_id = ? AND condition = ? AND foil = ?", cardID, condition, foil).First(&price).Error
+	err := s.db.Where("card_id = ? AND condition = ? AND printing = ?", cardID, condition, printing).First(&price).Error
 	if err != nil {
 		return nil, err
 	}
 	return &price, nil
+}
+
+// SaveCardPrices saves prices to the database (upsert) - exported for use by price worker
+func (s *PriceService) SaveCardPrices(cardID string, prices []models.CardPrice) {
+	s.saveCardPrices(cardID, prices)
 }
 
 // saveCardPrices saves prices to the database (upsert)
@@ -306,7 +312,7 @@ func (s *PriceService) saveCardPrices(cardID string, prices []models.CardPrice) 
 
 		// Upsert: update if exists, create if not
 		var existing models.CardPrice
-		err := s.db.Where("card_id = ? AND condition = ? AND foil = ?", cardID, p.Condition, p.Foil).First(&existing).Error
+		err := s.db.Where("card_id = ? AND condition = ? AND printing = ?", cardID, p.Condition, p.Printing).First(&existing).Error
 		if err == nil {
 			// Update existing
 			existing.PriceUSD = p.PriceUSD

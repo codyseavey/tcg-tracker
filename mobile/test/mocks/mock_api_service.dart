@@ -63,7 +63,7 @@ extension MockApiServiceExtension on MockApiService {
           ),
           quantity: 1,
           condition: 'NM',
-          foil: false,
+          printing: PrintingType.normal,
           addedAt: DateTime.now(),
         );
     when(
@@ -71,7 +71,7 @@ extension MockApiServiceExtension on MockApiService {
         any(),
         quantity: any(named: 'quantity'),
         condition: any(named: 'condition'),
-        foil: any(named: 'foil'),
+        printing: any(named: 'printing'),
       ),
     ).thenAnswer((_) async => defaultItem);
   }
@@ -83,7 +83,7 @@ extension MockApiServiceExtension on MockApiService {
         any(),
         quantity: any(named: 'quantity'),
         condition: any(named: 'condition'),
-        foil: any(named: 'foil'),
+        printing: any(named: 'printing'),
       ),
     ).thenThrow(Exception(message));
   }

@@ -16,12 +16,39 @@ const (
 	PriceConditionDMG PriceCondition = "DMG" // Damaged
 )
 
-// CardPrice stores condition-specific prices for a card
+// PrintingType represents card printing variants from JustTCG API
+type PrintingType string
+
+const (
+	PrintingNormal      PrintingType = "Normal"
+	PrintingFoil        PrintingType = "Foil"
+	Printing1stEdition  PrintingType = "1st Edition"
+	PrintingUnlimited   PrintingType = "Unlimited"
+	PrintingReverseHolo PrintingType = "Reverse Holofoil"
+)
+
+// AllPrintingTypes returns all valid printing types
+func AllPrintingTypes() []PrintingType {
+	return []PrintingType{
+		PrintingNormal,
+		PrintingFoil,
+		Printing1stEdition,
+		PrintingUnlimited,
+		PrintingReverseHolo,
+	}
+}
+
+// IsFoilVariant returns true if this printing type is a foil/premium variant
+func (p PrintingType) IsFoilVariant() bool {
+	return p == PrintingFoil || p == Printing1stEdition || p == PrintingReverseHolo
+}
+
+// CardPrice stores condition and printing-specific prices for a card
 type CardPrice struct {
 	ID             uint           `json:"id" gorm:"primaryKey"`
-	CardID         string         `json:"card_id" gorm:"not null;uniqueIndex:idx_card_cond_foil"`
-	Condition      PriceCondition `json:"condition" gorm:"not null;uniqueIndex:idx_card_cond_foil"`
-	Foil           bool           `json:"foil" gorm:"not null;uniqueIndex:idx_card_cond_foil"`
+	CardID         string         `json:"card_id" gorm:"not null;uniqueIndex:idx_card_cond_print"`
+	Condition      PriceCondition `json:"condition" gorm:"not null;uniqueIndex:idx_card_cond_print"`
+	Printing       PrintingType   `json:"printing" gorm:"not null;uniqueIndex:idx_card_cond_print;default:'Normal'"`
 	PriceUSD       float64        `json:"price_usd"`
 	Source         string         `json:"source"` // "justtcg", "tcgdex", "scryfall"
 	PriceUpdatedAt *time.Time     `json:"price_updated_at"`
@@ -57,4 +84,16 @@ func AllPriceConditions() []PriceCondition {
 		PriceConditionHP,
 		PriceConditionDMG,
 	}
+}
+
+// DerivePrintingFromLegacy converts legacy foil/firstEdition bools to PrintingType
+// Used for migration and backward compatibility
+func DerivePrintingFromLegacy(foil, firstEdition bool) PrintingType {
+	if firstEdition {
+		return Printing1stEdition
+	}
+	if foil {
+		return PrintingFoil
+	}
+	return PrintingNormal
 }

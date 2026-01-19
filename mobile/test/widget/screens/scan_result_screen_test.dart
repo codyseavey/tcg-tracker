@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mocktail/mocktail.dart';
 import 'package:network_image_mock/network_image_mock.dart';
 import 'package:mobile/models/card.dart';
+import 'package:mobile/models/collection_item.dart' show PrintingType;
 import 'package:mobile/screens/scan_result_screen.dart';
 import '../../fixtures/card_fixtures.dart';
 import '../../fixtures/scan_fixtures.dart';
@@ -10,6 +11,10 @@ import '../../mocks/mock_api_service.dart';
 
 void main() {
   late MockApiService mockApiService;
+
+  setUpAll(() {
+    registerFallbackValue(PrintingType.normal);
+  });
 
   setUp(() {
     mockApiService = MockApiService();
@@ -243,7 +248,7 @@ void main() {
         });
       });
 
-      testWidgets('add dialog pre-fills foil from scanMetadata', (
+      testWidgets('add dialog pre-fills printing from scanMetadata', (
         tester,
       ) async {
         await mockNetworkImagesFor(() async {
@@ -261,17 +266,12 @@ void main() {
           await tester.tap(find.text('Yes, this is correct'));
           await tester.pumpAndSettle();
 
-          // Find the first Switch (Foil) in SwitchListTile and verify it's on
-          // Note: There are now two Switches (Foil and First Edition)
-          final switchWidgets = tester
-              .widgetList<Switch>(find.byType(Switch))
-              .toList();
-          expect(switchWidgets.length, 2); // Foil and First Edition
-          expect(switchWidgets[0].value, isTrue); // First switch is Foil
+          // Verify the printing dropdown shows "Foil / Holo" when foil detected
+          expect(find.text('Foil / Holo'), findsOneWidget);
         });
       });
 
-      testWidgets('add dialog shows "Detected" label when foil detected', (
+      testWidgets('add dialog shows "Auto" label when printing auto-detected', (
         tester,
       ) async {
         await mockNetworkImagesFor(() async {
@@ -289,7 +289,8 @@ void main() {
           await tester.tap(find.text('Yes, this is correct'));
           await tester.pumpAndSettle();
 
-          expect(find.text('Detected'), findsOneWidget);
+          // The "Auto" label is shown next to printing when auto-detected
+          expect(find.text('Auto'), findsWidgets);
         });
       });
 
@@ -563,7 +564,7 @@ void main() {
             any(),
             quantity: any(named: 'quantity'),
             condition: any(named: 'condition'),
-            foil: any(named: 'foil'),
+            printing: any(named: 'printing'),
           ),
         ).thenThrow(Exception('Network error'));
 
@@ -612,7 +613,7 @@ void main() {
               'swsh4-025',
               quantity: 1,
               condition: 'NM',
-              foil: true,
+              printing: PrintingType.foil,
             ),
           ).called(1);
         });

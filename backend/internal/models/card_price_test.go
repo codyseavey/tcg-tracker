@@ -67,34 +67,36 @@ func TestCardGetPrice(t *testing.T) {
 		PriceUSD:     10.00,
 		PriceFoilUSD: 20.00,
 		Prices: []CardPrice{
-			{Condition: PriceConditionNM, Foil: false, PriceUSD: 10.00},
-			{Condition: PriceConditionNM, Foil: true, PriceUSD: 20.00},
-			{Condition: PriceConditionLP, Foil: false, PriceUSD: 8.00},
-			{Condition: PriceConditionLP, Foil: true, PriceUSD: 16.00},
-			{Condition: PriceConditionMP, Foil: false, PriceUSD: 6.00},
+			{Condition: PriceConditionNM, Printing: PrintingNormal, PriceUSD: 10.00},
+			{Condition: PriceConditionNM, Printing: PrintingFoil, PriceUSD: 20.00},
+			{Condition: PriceConditionLP, Printing: PrintingNormal, PriceUSD: 8.00},
+			{Condition: PriceConditionLP, Printing: PrintingFoil, PriceUSD: 16.00},
+			{Condition: PriceConditionMP, Printing: PrintingNormal, PriceUSD: 6.00},
 		},
 	}
 
 	tests := []struct {
 		name      string
 		condition PriceCondition
-		foil      bool
+		printing  PrintingType
 		expected  float64
 	}{
-		{"NM non-foil", PriceConditionNM, false, 10.00},
-		{"NM foil", PriceConditionNM, true, 20.00},
-		{"LP non-foil", PriceConditionLP, false, 8.00},
-		{"LP foil", PriceConditionLP, true, 16.00},
-		{"MP non-foil", PriceConditionMP, false, 6.00},
-		{"HP non-foil fallback to base", PriceConditionHP, false, 10.00}, // Falls back to base price
-		{"DMG foil fallback to base", PriceConditionDMG, true, 20.00},    // Falls back to foil base price
+		{"NM normal", PriceConditionNM, PrintingNormal, 10.00},
+		{"NM foil", PriceConditionNM, PrintingFoil, 20.00},
+		{"LP normal", PriceConditionLP, PrintingNormal, 8.00},
+		{"LP foil", PriceConditionLP, PrintingFoil, 16.00},
+		{"MP normal", PriceConditionMP, PrintingNormal, 6.00},
+		{"HP normal fallback to base", PriceConditionHP, PrintingNormal, 10.00},            // Falls back to base price
+		{"DMG foil fallback to base", PriceConditionDMG, PrintingFoil, 20.00},              // Falls back to foil base price
+		{"NM 1st Edition fallback to foil", PriceConditionNM, Printing1stEdition, 20.00},   // No 1st ed price, IsFoilVariant=true
+		{"NM Reverse Holo fallback to foil", PriceConditionNM, PrintingReverseHolo, 20.00}, // No reverse price, IsFoilVariant=true
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := card.GetPrice(tt.condition, tt.foil)
+			result := card.GetPrice(tt.condition, tt.printing)
 			if result != tt.expected {
-				t.Errorf("GetPrice(%s, %v) = %f, want %f", tt.condition, tt.foil, result, tt.expected)
+				t.Errorf("GetPrice(%s, %s) = %f, want %f", tt.condition, tt.printing, result, tt.expected)
 			}
 		})
 	}

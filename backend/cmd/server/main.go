@@ -61,14 +61,8 @@ func main() {
 	// Initialize price service with fallback chain
 	priceService := services.NewPriceService(justTCGService, tcgdexService, scryfallService, database.GetDB())
 
-	// Initialize price worker
-	dailyLimit := 100 // Default daily API request limit
-	if limitStr := os.Getenv("POKEMON_PRICE_DAILY_LIMIT"); limitStr != "" {
-		if limit, err := strconv.Atoi(limitStr); err == nil {
-			dailyLimit = limit
-		}
-	}
-	priceWorker := services.NewPriceWorker(priceService, pokemonService, dailyLimit)
+	// Initialize price worker with JustTCG batch support
+	priceWorker := services.NewPriceWorker(priceService, pokemonService, justTCGService)
 
 	// Initialize image storage service
 	imageStorageService := services.NewImageStorageService()

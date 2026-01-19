@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useCollectionStore } from '../stores/collection'
+import { isFoilPrinting } from '../utils/formatters'
 import CardGrid from '../components/CardGrid.vue'
 import CardDetail from '../components/CardDetail.vue'
 
@@ -22,8 +23,8 @@ const filteredItems = computed(() => {
       case 'name':
         return a.card.name.localeCompare(b.card.name)
       case 'value': {
-        const valueA = a.foil ? a.card.price_foil_usd : a.card.price_usd
-        const valueB = b.foil ? b.card.price_foil_usd : b.card.price_usd
+        const valueA = isFoilPrinting(a.printing) ? a.card.price_foil_usd : a.card.price_usd
+        const valueB = isFoilPrinting(b.printing) ? b.card.price_foil_usd : b.card.price_usd
         return (valueB || 0) - (valueA || 0)
       }
       case 'added_at':
@@ -39,8 +40,8 @@ const handleSelect = (item) => {
   selectedItem.value = item
 }
 
-const handleUpdate = async ({ id, quantity, condition, foil }) => {
-  await store.updateItem(id, { quantity, condition, foil })
+const handleUpdate = async ({ id, quantity, condition, printing }) => {
+  await store.updateItem(id, { quantity, condition, printing })
   selectedItem.value = null
 }
 

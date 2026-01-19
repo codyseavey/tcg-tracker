@@ -28,7 +28,7 @@ func (h *PriceHandler) GetPriceStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, status)
 }
 
-// RefreshCardPrice manually refreshes a single card's price
+// RefreshCardPrice queues a card for price refresh in the next batch
 func (h *PriceHandler) RefreshCardPrice(c *gin.Context) {
 	cardID := c.Param("id")
 
@@ -37,19 +37,21 @@ func (h *PriceHandler) RefreshCardPrice(c *gin.Context) {
 		return
 	}
 
-	card, err := h.priceWorker.UpdateCard(cardID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	if card == nil {
+	// Verify card exists
+	db := database.GetDB()
+	var card models.Card
+	if err := db.First(&card, "id = ?", cardID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "card not found"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"card": card,
+	// Queue for next batch update instead of immediate refresh
+	queuePosition := h.priceWorker.QueueRefresh(cardID)
+
+	c.JSON(http.StatusAccepted, gin.H{
+		"message":        "Price refresh queued for next update",
+		"card_id":        cardID,
+		"queue_position": queuePosition,
 	})
 }
 

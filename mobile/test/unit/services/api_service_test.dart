@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:mocktail/mocktail.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:mobile/models/collection_item.dart' show PrintingType;
 import 'package:mobile/services/api_service.dart';
 import '../../fixtures/card_fixtures.dart';
 import '../../fixtures/scan_fixtures.dart';
@@ -27,33 +28,33 @@ void main() {
     // Mock the secure storage method channel with in-memory storage
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(
-      const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
-      (MethodCall methodCall) async {
-        final args = methodCall.arguments as Map<dynamic, dynamic>?;
-        final key = args?['key'] as String?;
+          const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
+          (MethodCall methodCall) async {
+            final args = methodCall.arguments as Map<dynamic, dynamic>?;
+            final key = args?['key'] as String?;
 
-        switch (methodCall.method) {
-          case 'read':
-            return _secureStorageValues[key];
-          case 'write':
-            final value = args?['value'] as String?;
-            if (key != null && value != null) {
-              _secureStorageValues[key] = value;
+            switch (methodCall.method) {
+              case 'read':
+                return _secureStorageValues[key];
+              case 'write':
+                final value = args?['value'] as String?;
+                if (key != null && value != null) {
+                  _secureStorageValues[key] = value;
+                }
+                return null;
+              case 'delete':
+                if (key != null) {
+                  _secureStorageValues.remove(key);
+                }
+                return null;
+              case 'deleteAll':
+                _secureStorageValues.clear();
+                return null;
+              default:
+                return null;
             }
-            return null;
-          case 'delete':
-            if (key != null) {
-              _secureStorageValues.remove(key);
-            }
-            return null;
-          case 'deleteAll':
-            _secureStorageValues.clear();
-            return null;
-          default:
-            return null;
-        }
-      },
-    );
+          },
+        );
   });
 
   setUp(() {
@@ -98,10 +99,8 @@ void main() {
         final service = ApiService(httpClient: mockHttpClient);
 
         when(() => mockHttpClient.get(any())).thenAnswer(
-          (_) async => http.Response(
-            json.encode(CardFixtures.searchResultJson),
-            200,
-          ),
+          (_) async =>
+              http.Response(json.encode(CardFixtures.searchResultJson), 200),
         );
 
         final result = await service.searchCards('charizard', 'pokemon');
@@ -116,19 +115,19 @@ void main() {
         final service = ApiService(httpClient: mockHttpClient);
 
         when(() => mockHttpClient.get(any())).thenAnswer(
-          (_) async => http.Response(
-            json.encode({'error': 'Card not found'}),
-            404,
-          ),
+          (_) async =>
+              http.Response(json.encode({'error': 'Card not found'}), 404),
         );
 
         expect(
           () => service.searchCards('nonexistent', 'pokemon'),
-          throwsA(isA<Exception>().having(
-            (e) => e.toString(),
-            'message',
-            contains('Card not found'),
-          )),
+          throwsA(
+            isA<Exception>().having(
+              (e) => e.toString(),
+              'message',
+              contains('Card not found'),
+            ),
+          ),
         );
       });
 
@@ -136,20 +135,19 @@ void main() {
         _secureStorageValues['server_url'] = 'http://test:8080';
         final service = ApiService(httpClient: mockHttpClient);
 
-        when(() => mockHttpClient.get(any())).thenAnswer(
-          (_) async => http.Response(
-            json.encode({}),
-            500,
-          ),
-        );
+        when(
+          () => mockHttpClient.get(any()),
+        ).thenAnswer((_) async => http.Response(json.encode({}), 500));
 
         expect(
           () => service.searchCards('test', 'mtg'),
-          throwsA(isA<Exception>().having(
-            (e) => e.toString(),
-            'message',
-            contains('Failed to search cards'),
-          )),
+          throwsA(
+            isA<Exception>().having(
+              (e) => e.toString(),
+              'message',
+              contains('Failed to search cards'),
+            ),
+          ),
         );
       });
 
@@ -181,18 +179,23 @@ void main() {
         _secureStorageValues['server_url'] = 'http://test:8080';
         final service = ApiService(httpClient: mockHttpClient);
 
-        when(() => mockHttpClient.post(
-              any(),
-              headers: any(named: 'headers'),
-              body: any(named: 'body'),
-            )).thenAnswer(
+        when(
+          () => mockHttpClient.post(
+            any(),
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          ),
+        ).thenAnswer(
           (_) async => http.Response(
             json.encode(ScanFixtures.completeScanResultJson),
             200,
           ),
         );
 
-        final result = await service.identifyCard('Charizard VMAX\n025/185', 'pokemon');
+        final result = await service.identifyCard(
+          'Charizard VMAX\n025/185',
+          'pokemon',
+        );
 
         expect(result.cards.length, 2);
         expect(result.metadata.cardName, 'Charizard VMAX');
@@ -203,24 +206,26 @@ void main() {
         _secureStorageValues['server_url'] = 'http://test:8080';
         final service = ApiService(httpClient: mockHttpClient);
 
-        when(() => mockHttpClient.post(
-              any(),
-              headers: any(named: 'headers'),
-              body: any(named: 'body'),
-            )).thenAnswer(
-          (_) async => http.Response(
-            json.encode({'error': 'OCR parsing failed'}),
-            400,
+        when(
+          () => mockHttpClient.post(
+            any(),
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
           ),
+        ).thenAnswer(
+          (_) async =>
+              http.Response(json.encode({'error': 'OCR parsing failed'}), 400),
         );
 
         expect(
           () => service.identifyCard('garbled text', 'pokemon'),
-          throwsA(isA<Exception>().having(
-            (e) => e.toString(),
-            'message',
-            contains('OCR parsing failed'),
-          )),
+          throwsA(
+            isA<Exception>().having(
+              (e) => e.toString(),
+              'message',
+              contains('OCR parsing failed'),
+            ),
+          ),
         );
       });
 
@@ -229,12 +234,15 @@ void main() {
         final service = ApiService(httpClient: mockHttpClient);
 
         String? capturedBody;
-        when(() => mockHttpClient.post(
-              any(),
-              headers: any(named: 'headers'),
-              body: any(named: 'body'),
-            )).thenAnswer((invocation) async {
-          capturedBody = invocation.namedArguments[const Symbol('body')] as String;
+        when(
+          () => mockHttpClient.post(
+            any(),
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          ),
+        ).thenAnswer((invocation) async {
+          capturedBody =
+              invocation.namedArguments[const Symbol('body')] as String;
           return http.Response(
             json.encode(ScanFixtures.emptyScanResultJson),
             200,
@@ -253,13 +261,16 @@ void main() {
         final service = ApiService(httpClient: mockHttpClient);
 
         Map<String, String>? capturedHeaders;
-        when(() => mockHttpClient.post(
-              any(),
-              headers: any(named: 'headers'),
-              body: any(named: 'body'),
-            )).thenAnswer((invocation) async {
-          capturedHeaders = invocation.namedArguments[const Symbol('headers')]
-              as Map<String, String>;
+        when(
+          () => mockHttpClient.post(
+            any(),
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          ),
+        ).thenAnswer((invocation) async {
+          capturedHeaders =
+              invocation.namedArguments[const Symbol('headers')]
+                  as Map<String, String>;
           return http.Response(
             json.encode(ScanFixtures.emptyScanResultJson),
             200,
@@ -277,47 +288,43 @@ void main() {
         _secureStorageValues['server_url'] = 'http://test:8080';
         final service = ApiService(httpClient: mockHttpClient);
 
-        when(() => mockHttpClient.post(
-              any(),
-              headers: any(named: 'headers'),
-              body: any(named: 'body'),
-            )).thenAnswer(
-          (_) async => http.Response('{}', 200),
-        );
+        when(
+          () => mockHttpClient.post(
+            any(),
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          ),
+        ).thenAnswer((_) async => http.Response('{}', 200));
 
-        await expectLater(
-          service.addToCollection('card-123'),
-          completes,
-        );
+        await expectLater(service.addToCollection('card-123'), completes);
       });
 
       test('completes successfully on 201 response', () async {
         _secureStorageValues['server_url'] = 'http://test:8080';
         final service = ApiService(httpClient: mockHttpClient);
 
-        when(() => mockHttpClient.post(
-              any(),
-              headers: any(named: 'headers'),
-              body: any(named: 'body'),
-            )).thenAnswer(
-          (_) async => http.Response('{}', 201),
-        );
+        when(
+          () => mockHttpClient.post(
+            any(),
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          ),
+        ).thenAnswer((_) async => http.Response('{}', 201));
 
-        await expectLater(
-          service.addToCollection('card-123'),
-          completes,
-        );
+        await expectLater(service.addToCollection('card-123'), completes);
       });
 
       test('throws exception with error message on failure', () async {
         _secureStorageValues['server_url'] = 'http://test:8080';
         final service = ApiService(httpClient: mockHttpClient);
 
-        when(() => mockHttpClient.post(
-              any(),
-              headers: any(named: 'headers'),
-              body: any(named: 'body'),
-            )).thenAnswer(
+        when(
+          () => mockHttpClient.post(
+            any(),
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          ),
+        ).thenAnswer(
           (_) async => http.Response(
             json.encode({'error': 'Card already in collection'}),
             409,
@@ -326,11 +333,13 @@ void main() {
 
         expect(
           () => service.addToCollection('card-123'),
-          throwsA(isA<Exception>().having(
-            (e) => e.toString(),
-            'message',
-            contains('Card already in collection'),
-          )),
+          throwsA(
+            isA<Exception>().having(
+              (e) => e.toString(),
+              'message',
+              contains('Card already in collection'),
+            ),
+          ),
         );
       });
 
@@ -339,12 +348,15 @@ void main() {
         final service = ApiService(httpClient: mockHttpClient);
 
         String? capturedBody;
-        when(() => mockHttpClient.post(
-              any(),
-              headers: any(named: 'headers'),
-              body: any(named: 'body'),
-            )).thenAnswer((invocation) async {
-          capturedBody = invocation.namedArguments[const Symbol('body')] as String;
+        when(
+          () => mockHttpClient.post(
+            any(),
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          ),
+        ).thenAnswer((invocation) async {
+          capturedBody =
+              invocation.namedArguments[const Symbol('body')] as String;
           return http.Response('{}', 200);
         });
 
@@ -354,7 +366,7 @@ void main() {
         expect(decodedBody['card_id'], 'card-123');
         expect(decodedBody['quantity'], 1);
         expect(decodedBody['condition'], 'NM');
-        expect(decodedBody['foil'], false);
+        expect(decodedBody['printing'], 'Normal');
       });
 
       test('sends correct request body with custom values', () async {
@@ -362,12 +374,15 @@ void main() {
         final service = ApiService(httpClient: mockHttpClient);
 
         String? capturedBody;
-        when(() => mockHttpClient.post(
-              any(),
-              headers: any(named: 'headers'),
-              body: any(named: 'body'),
-            )).thenAnswer((invocation) async {
-          capturedBody = invocation.namedArguments[const Symbol('body')] as String;
+        when(
+          () => mockHttpClient.post(
+            any(),
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          ),
+        ).thenAnswer((invocation) async {
+          capturedBody =
+              invocation.namedArguments[const Symbol('body')] as String;
           return http.Response('{}', 200);
         });
 
@@ -375,14 +390,14 @@ void main() {
           'card-456',
           quantity: 3,
           condition: 'LP',
-          foil: true,
+          printing: PrintingType.foil,
         );
 
         final decodedBody = json.decode(capturedBody!);
         expect(decodedBody['card_id'], 'card-456');
         expect(decodedBody['quantity'], 3);
         expect(decodedBody['condition'], 'LP');
-        expect(decodedBody['foil'], true);
+        expect(decodedBody['printing'], 'Foil');
       });
 
       test('uses correct endpoint URL', () async {
@@ -390,11 +405,13 @@ void main() {
         final service = ApiService(httpClient: mockHttpClient);
 
         Uri? capturedUri;
-        when(() => mockHttpClient.post(
-              any(),
-              headers: any(named: 'headers'),
-              body: any(named: 'body'),
-            )).thenAnswer((invocation) async {
+        when(
+          () => mockHttpClient.post(
+            any(),
+            headers: any(named: 'headers'),
+            body: any(named: 'body'),
+          ),
+        ).thenAnswer((invocation) async {
           capturedUri = invocation.positionalArguments[0] as Uri;
           return http.Response('{}', 200);
         });

@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 flutter pub get                      # Install dependencies
 flutter run                          # Run on connected device/emulator
-flutter test                         # Run all tests (113 tests)
+flutter test                         # Run all tests (121 tests)
 flutter test test/unit/              # Run unit tests only
 flutter test test/widget/            # Run widget tests only
 flutter test --plain-name "test name" path/to/test.dart  # Run single test
@@ -41,7 +41,7 @@ lib/
 2. Backend's OCRParser extracts metadata (name, set code, card number, foil indicators, confidence)
 3. Backend searches and returns matching cards with parsed metadata
 4. **ScanResultScreen** displays results with confidence badge, allows adding to collection
-5. Collection additions POST to `/api/collection` with quantity, condition, foil status
+5. Collection additions POST to `/api/collection` with quantity, condition, printing type
 
 ## Testing
 
@@ -65,7 +65,8 @@ test/
 |-------|---------|
 | `CardModel` | Single card with id, name, setName, setCode, cardNumber, rarity, imageUrl, priceUsd, priceFoilUsd |
 | `CardSearchResult` | Search response: cards list, totalCount, hasMore |
-| `ScanMetadata` | OCR parsing results: cardName, cardNumber, setCode, confidence, isFoil, foilIndicators |
+| `ScanMetadata` | OCR parsing results: cardName, cardNumber, setCode, confidence, printing, foilIndicators |
+| `CollectionItem` | Collection entry with card, quantity, condition, printing (enum: Normal, Foil, 1st Edition, etc.) |
 | `ScanResult` | Combined: cards + metadata from `/cards/identify` |
 
 Helper getters: `CardModel.displayPrice` returns formatted price or "N/A", `CardModel.displaySet` returns setName → setCode → "Unknown Set" fallback.
@@ -74,7 +75,7 @@ Helper getters: `CardModel.displayPrice` returns formatted price or "N/A", `Card
 
 - Server URL stored in secure storage (default: `https://tcg.seavey.dev`)
 - 35-second timeout on all HTTP requests
-- ApiService methods: `searchCards(query, game)`, `identifyCard(text, game)`, `addToCollection(cardId, quantity, condition, foil)`
+- ApiService methods: `searchCards(query, game)`, `identifyCard(text, game)`, `addToCollection(cardId, quantity, condition, printing)`
 
 ## Key Dependencies
 

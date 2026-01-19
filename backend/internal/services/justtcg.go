@@ -1,65 +1,99 @@
 package services
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/codyseavey/tcg-tracker/backend/internal/models"
 )
 
 const (
-	justTCGBaseURL        = "https://api.justtcg.com/v1"
-	justTCGDefaultTimeout = 10 * time.Second
+	justTCGBaseURL   = "https://api.justtcg.com/v1"
+	justTCGBatchSize = 20 // Max cards per request
+	justTCGRateLimit = 10 // Requests per minute
 )
 
 // JustTCGService handles API calls to JustTCG for card pricing
 type JustTCGService struct {
-	client     *http.Client
-	apiKey     string
-	baseURL    string
-	dailyLimit int
+	client  *http.Client
+	apiKey  string
+	baseURL string
 
-	// Rate limiting
+	// Rate limiting (10 requests per minute)
+	rateLimiter *rate.Limiter
+
+	// Daily/monthly tracking
 	mu             sync.Mutex
+	dailyLimit     int
 	requestsToday  int
 	lastRequestDay time.Time
 }
 
-// JustTCGPriceResponse represents the API response for price queries
-type JustTCGPriceResponse struct {
-	Success bool            `json:"success"`
-	Data    JustTCGCardData `json:"data"`
-	Error   string          `json:"error,omitempty"`
+// JustTCG API response structures (matching actual API)
+type JustTCGResponse struct {
+	Data     []JustTCGCard `json:"data"`
+	Meta     *JustTCGMeta  `json:"meta,omitempty"`
+	Metadata JustTCGUsage  `json:"_metadata"`
+	Error    string        `json:"error,omitempty"`
+	Code     string        `json:"code,omitempty"`
 }
 
-// JustTCGCardData contains card information including prices
-type JustTCGCardData struct {
-	CardName   string         `json:"card_name"`
-	SetName    string         `json:"set_name"`
-	SetCode    string         `json:"set_code"`
-	CardNumber string         `json:"card_number"`
-	Prices     []JustTCGPrice `json:"prices"`
+type JustTCGCard struct {
+	ID          string           `json:"id"`
+	Name        string           `json:"name"`
+	Game        string           `json:"game"`
+	Set         string           `json:"set"`
+	SetName     string           `json:"set_name"`
+	Number      string           `json:"number"`
+	TCGPlayerID string           `json:"tcgplayerId"`
+	Rarity      string           `json:"rarity"`
+	Variants    []JustTCGVariant `json:"variants"`
 }
 
-// JustTCGPrice represents a single condition/foil price entry
-type JustTCGPrice struct {
-	Condition string  `json:"condition"` // NM, LP, MP, HP, DMG
-	Foil      bool    `json:"foil"`
-	PriceUSD  float64 `json:"price_usd"`
-	LastSeen  string  `json:"last_seen,omitempty"`
+type JustTCGVariant struct {
+	ID          string  `json:"id"`
+	Printing    string  `json:"printing"`  // "Normal", "Foil", "1st Edition", etc.
+	Condition   string  `json:"condition"` // "Near Mint", "Lightly Played", etc.
+	Language    string  `json:"language"`
+	Price       float64 `json:"price"`
+	LastUpdated int64   `json:"lastUpdated"`
 }
 
-// JustTCGSearchResponse represents the API response for search queries
-type JustTCGSearchResponse struct {
-	Success bool              `json:"success"`
-	Data    []JustTCGCardData `json:"data"`
-	Error   string            `json:"error,omitempty"`
+type JustTCGMeta struct {
+	Total   int  `json:"total"`
+	Limit   int  `json:"limit"`
+	Offset  int  `json:"offset"`
+	HasMore bool `json:"hasMore"`
+}
+
+type JustTCGUsage struct {
+	APIPlan                   string `json:"apiPlan"`
+	APIRequestLimit           int    `json:"apiRequestLimit"`
+	APIRequestsUsed           int    `json:"apiRequestsUsed"`
+	APIRequestsRemaining      int    `json:"apiRequestsRemaining"`
+	APIDailyLimit             int    `json:"apiDailyLimit"`
+	APIDailyRequestsUsed      int    `json:"apiDailyRequestsUsed"`
+	APIDailyRequestsRemaining int    `json:"apiDailyRequestsRemaining"`
+	APIRateLimit              int    `json:"apiRateLimit"`
+}
+
+// CardLookup specifies how to find a card in JustTCG
+type CardLookup struct {
+	CardID      string // Our internal card ID (for mapping results back)
+	TCGPlayerID string `json:"tcgplayerId,omitempty"`
+	Name        string `json:"q,omitempty"`
+	Set         string `json:"set,omitempty"`
+	Game        string `json:"game,omitempty"`
 }
 
 // NewJustTCGService creates a new JustTCG API service
@@ -68,19 +102,23 @@ func NewJustTCGService(apiKey string, dailyLimit int) *JustTCGService {
 		dailyLimit = 100 // Default free tier limit
 	}
 
+	// Rate limiter: 10 requests per minute = 1 request every 6 seconds
+	limiter := rate.NewLimiter(rate.Every(6*time.Second), 1)
+
 	return &JustTCGService{
 		client: &http.Client{
-			Timeout: justTCGDefaultTimeout,
+			Timeout: 30 * time.Second, // Longer timeout for batch requests
 		},
-		apiKey:     apiKey,
-		baseURL:    justTCGBaseURL,
-		dailyLimit: dailyLimit,
+		apiKey:      apiKey,
+		baseURL:     justTCGBaseURL,
+		dailyLimit:  dailyLimit,
+		rateLimiter: limiter,
 	}
 }
 
-// checkRateLimit checks if we can make another request today
+// checkDailyLimit checks if we can make another request today
 // Returns true if request can proceed, false if rate limited
-func (s *JustTCGService) checkRateLimit() bool {
+func (s *JustTCGService) checkDailyLimit() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -121,37 +159,88 @@ func (s *JustTCGService) GetRequestsRemaining() int {
 	return remaining
 }
 
-// GetCardPrices fetches condition-specific prices for a card
+// GetCardPrices fetches condition-specific prices for a single card
+// This is a convenience wrapper around BatchGetPrices for backward compatibility
 func (s *JustTCGService) GetCardPrices(cardName, setCode string, game models.Game) ([]models.CardPrice, error) {
-	if !s.checkRateLimit() {
+	gameStr := "pokemon"
+	if game == models.GameMTG {
+		gameStr = "magic-the-gathering"
+	}
+
+	lookup := CardLookup{
+		CardID: "", // Will be set by caller
+		Name:   cardName,
+		Set:    setCode,
+		Game:   gameStr,
+	}
+
+	results, err := s.BatchGetPrices([]CardLookup{lookup})
+	if err != nil {
+		return nil, err
+	}
+
+	// Return the first result (there should only be one)
+	for _, prices := range results {
+		return prices, nil
+	}
+
+	return nil, nil
+}
+
+// BatchGetPrices fetches prices for multiple cards in a single API call (max 20)
+func (s *JustTCGService) BatchGetPrices(lookups []CardLookup) (map[string][]models.CardPrice, error) {
+	if len(lookups) == 0 {
+		return nil, nil
+	}
+	if len(lookups) > justTCGBatchSize {
+		return nil, fmt.Errorf("batch size %d exceeds max %d", len(lookups), justTCGBatchSize)
+	}
+
+	// Wait for rate limiter
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := s.rateLimiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("rate limit wait failed: %w", err)
+	}
+
+	// Check daily limit
+	if !s.checkDailyLimit() {
 		return nil, fmt.Errorf("JustTCG daily rate limit exceeded")
 	}
 
-	// Build request URL
-	gameStr := "pokemon"
-	if game == models.GameMTG {
-		gameStr = "mtg"
+	// For single card lookup, use GET with query params
+	if len(lookups) == 1 {
+		return s.getSingleCard(lookups[0])
 	}
 
+	// For multiple cards, use POST batch endpoint
+	return s.postBatchCards(lookups)
+}
+
+// getSingleCard fetches a single card using GET request
+func (s *JustTCGService) getSingleCard(lookup CardLookup) (map[string][]models.CardPrice, error) {
 	params := url.Values{}
-	params.Set("name", cardName)
-	params.Set("game", gameStr)
-	if setCode != "" {
-		params.Set("set", setCode)
+	if lookup.Name != "" {
+		params.Set("q", lookup.Name)
 	}
+	if lookup.Game != "" {
+		params.Set("game", lookup.Game)
+	}
+	if lookup.Set != "" {
+		params.Set("set", lookup.Set)
+	}
+	// Request all conditions but limit stats to reduce response size
+	params.Set("include_price_history", "false")
+	params.Set("include_statistics", "")
 
-	reqURL := fmt.Sprintf("%s/cards/price?%s", s.baseURL, params.Encode())
+	reqURL := fmt.Sprintf("%s/cards?%s", s.baseURL, params.Encode())
 
 	req, err := http.NewRequestWithContext(context.Background(), "GET", reqURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Add API key if provided
-	if s.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+s.apiKey)
-	}
-	req.Header.Set("Accept", "application/json")
+	s.setHeaders(req)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -163,69 +252,73 @@ func (s *JustTCGService) GetCardPrices(cardName, setCode string, game models.Gam
 		return nil, fmt.Errorf("JustTCG API error: status %d", resp.StatusCode)
 	}
 
-	var priceResp JustTCGPriceResponse
-	if err := json.NewDecoder(resp.Body).Decode(&priceResp); err != nil {
+	var apiResp JustTCGResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	if !priceResp.Success {
-		if priceResp.Error != "" {
-			return nil, fmt.Errorf("JustTCG API error: %s", priceResp.Error)
-		}
-		return nil, fmt.Errorf("JustTCG API returned unsuccessful response")
+	if apiResp.Error != "" {
+		return nil, fmt.Errorf("JustTCG API error: %s", apiResp.Error)
 	}
 
-	// Convert to CardPrice models
-	now := time.Now()
-	var prices []models.CardPrice
-	for _, p := range priceResp.Data.Prices {
-		condition := mapJustTCGCondition(p.Condition)
-		if condition == "" {
-			continue
+	// Convert response to CardPrice map
+	results := make(map[string][]models.CardPrice)
+	for _, card := range apiResp.Data {
+		prices := s.convertVariantsToPrices(card.Variants)
+		if len(prices) > 0 {
+			// Use the card name as key since we don't have our internal ID
+			key := card.Name
+			if lookup.CardID != "" {
+				key = lookup.CardID
+			}
+			results[key] = prices
 		}
-
-		prices = append(prices, models.CardPrice{
-			Condition:      condition,
-			Foil:           p.Foil,
-			PriceUSD:       p.PriceUSD,
-			Source:         "justtcg",
-			PriceUpdatedAt: &now,
-		})
 	}
 
-	return prices, nil
+	log.Printf("JustTCG: fetched %d cards, %d with prices (remaining: %d daily)",
+		len(apiResp.Data), len(results), apiResp.Metadata.APIDailyRequestsRemaining)
+
+	return results, nil
 }
 
-// SearchCards searches for cards by name and returns results with prices
-func (s *JustTCGService) SearchCards(query string, game models.Game) ([]JustTCGCardData, error) {
-	if !s.checkRateLimit() {
-		return nil, fmt.Errorf("JustTCG daily rate limit exceeded")
+// postBatchCards fetches multiple cards using POST request
+func (s *JustTCGService) postBatchCards(lookups []CardLookup) (map[string][]models.CardPrice, error) {
+	// Build request body
+	requestBody := make([]map[string]interface{}, len(lookups))
+	for i, lookup := range lookups {
+		item := make(map[string]interface{})
+		if lookup.TCGPlayerID != "" {
+			item["tcgplayerId"] = lookup.TCGPlayerID
+		}
+		if lookup.Name != "" {
+			item["q"] = lookup.Name
+		}
+		if lookup.Game != "" {
+			item["game"] = lookup.Game
+		}
+		if lookup.Set != "" {
+			item["set"] = lookup.Set
+		}
+		requestBody[i] = item
 	}
 
-	gameStr := "pokemon"
-	if game == models.GameMTG {
-		gameStr = "mtg"
+	jsonBody, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	params := url.Values{}
-	params.Set("q", query)
-	params.Set("game", gameStr)
-
-	reqURL := fmt.Sprintf("%s/cards/search?%s", s.baseURL, params.Encode())
-
-	req, err := http.NewRequestWithContext(context.Background(), "GET", reqURL, nil)
+	reqURL := fmt.Sprintf("%s/cards?include_price_history=false&include_statistics=", s.baseURL)
+	req, err := http.NewRequestWithContext(context.Background(), "POST", reqURL, bytes.NewBuffer(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	if s.apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+s.apiKey)
-	}
-	req.Header.Set("Accept", "application/json")
+	s.setHeaders(req)
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to search cards: %w", err)
+		return nil, fmt.Errorf("failed to fetch prices: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -233,35 +326,123 @@ func (s *JustTCGService) SearchCards(query string, game models.Game) ([]JustTCGC
 		return nil, fmt.Errorf("JustTCG API error: status %d", resp.StatusCode)
 	}
 
-	var searchResp JustTCGSearchResponse
-	if err := json.NewDecoder(resp.Body).Decode(&searchResp); err != nil {
+	var apiResp JustTCGResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	if !searchResp.Success {
-		if searchResp.Error != "" {
-			return nil, fmt.Errorf("JustTCG API error: %s", searchResp.Error)
-		}
-		return nil, fmt.Errorf("JustTCG API returned unsuccessful response")
+	if apiResp.Error != "" {
+		return nil, fmt.Errorf("JustTCG API error: %s", apiResp.Error)
 	}
 
-	return searchResp.Data, nil
+	// Convert response to CardPrice map
+	// We need to match results back to our lookups
+	results := make(map[string][]models.CardPrice)
+	for i, card := range apiResp.Data {
+		prices := s.convertVariantsToPrices(card.Variants)
+		if len(prices) > 0 {
+			// Use lookup's CardID if available, otherwise use response card name
+			key := card.Name
+			if i < len(lookups) && lookups[i].CardID != "" {
+				key = lookups[i].CardID
+			}
+			results[key] = prices
+		}
+	}
+
+	log.Printf("JustTCG: batch fetched %d cards, %d with prices (remaining: %d daily)",
+		len(apiResp.Data), len(results), apiResp.Metadata.APIDailyRequestsRemaining)
+
+	return results, nil
+}
+
+// setHeaders sets common headers for API requests
+func (s *JustTCGService) setHeaders(req *http.Request) {
+	if s.apiKey != "" {
+		req.Header.Set("X-API-Key", s.apiKey)
+	}
+	req.Header.Set("Accept", "application/json")
+}
+
+// convertVariantsToPrices converts JustTCG variants to our CardPrice model
+func (s *JustTCGService) convertVariantsToPrices(variants []JustTCGVariant) []models.CardPrice {
+	var prices []models.CardPrice
+	now := time.Now()
+
+	for _, v := range variants {
+		condition := mapJustTCGCondition(v.Condition)
+		printing := mapJustTCGPrinting(v.Printing)
+
+		if condition == "" {
+			continue
+		}
+		if printing == "" {
+			printing = models.PrintingNormal
+		}
+
+		// Skip if price is 0 or negative
+		if v.Price <= 0 {
+			continue
+		}
+
+		prices = append(prices, models.CardPrice{
+			Condition:      condition,
+			Printing:       printing,
+			PriceUSD:       v.Price,
+			Source:         "justtcg",
+			PriceUpdatedAt: &now,
+		})
+	}
+
+	return prices
 }
 
 // mapJustTCGCondition maps JustTCG condition strings to our PriceCondition type
 func mapJustTCGCondition(condition string) models.PriceCondition {
-	switch strings.ToUpper(condition) {
-	case "NM", "NEAR MINT":
+	switch strings.ToLower(condition) {
+	case "near mint", "nm":
 		return models.PriceConditionNM
-	case "LP", "LIGHTLY PLAYED":
+	case "lightly played", "lp":
 		return models.PriceConditionLP
-	case "MP", "MODERATELY PLAYED":
+	case "moderately played", "mp":
 		return models.PriceConditionMP
-	case "HP", "HEAVILY PLAYED":
+	case "heavily played", "hp":
 		return models.PriceConditionHP
-	case "DMG", "DAMAGED":
+	case "damaged", "dmg":
 		return models.PriceConditionDMG
 	default:
 		return ""
+	}
+}
+
+// mapJustTCGPrinting maps JustTCG printing strings to our PrintingType
+func mapJustTCGPrinting(printing string) models.PrintingType {
+	switch printing {
+	case "Normal":
+		return models.PrintingNormal
+	case "Foil":
+		return models.PrintingFoil
+	case "1st Edition":
+		return models.Printing1stEdition
+	case "Unlimited":
+		return models.PrintingUnlimited
+	case "Reverse Holofoil":
+		return models.PrintingReverseHolo
+	default:
+		// Try case-insensitive match
+		switch strings.ToLower(printing) {
+		case "normal":
+			return models.PrintingNormal
+		case "foil", "holo", "holofoil":
+			return models.PrintingFoil
+		case "1st edition", "first edition":
+			return models.Printing1stEdition
+		case "unlimited":
+			return models.PrintingUnlimited
+		case "reverse holofoil", "reverse holo", "reverse":
+			return models.PrintingReverseHolo
+		default:
+			return ""
+		}
 	}
 }

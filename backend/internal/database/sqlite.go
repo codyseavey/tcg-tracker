@@ -46,6 +46,13 @@ func Initialize(dbPath string) error {
 		return err
 	}
 
+	log.Println("Database schema migration completed")
+
+	// Run custom data migrations
+	if err := RunMigrations(DB); err != nil {
+		log.Printf("Warning: data migrations had issues: %v", err)
+	}
+
 	log.Println("Database migration completed")
 	return nil
 }

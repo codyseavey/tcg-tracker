@@ -1,3 +1,5 @@
+import 'collection_item.dart' show PrintingType;
+
 class CardModel {
   final String id;
   final String game;
@@ -92,8 +94,11 @@ class ScanMetadata {
   final bool isFirstEdition;
   final List<String> firstEdIndicators;
   // Set identification metadata
-  final String? matchReason;    // How set was determined: "set_code", "set_name", "unique_set_total", "inferred_from_total"
+  final String?
+  matchReason; // How set was determined: "set_code", "set_name", "unique_set_total", "inferred_from_total"
   final List<String> candidateSets; // Possible sets when ambiguous
+  // Reverse holo detection
+  final bool isReverseHolo;
 
   ScanMetadata({
     this.cardName,
@@ -115,6 +120,7 @@ class ScanMetadata {
     this.firstEdIndicators = const [],
     this.matchReason,
     this.candidateSets = const [],
+    this.isReverseHolo = false,
   });
 
   factory ScanMetadata.fromJson(Map<String, dynamic> json) {
@@ -156,6 +162,7 @@ class ScanMetadata {
               ?.map((e) => e.toString())
               .toList() ??
           [],
+      isReverseHolo: json['is_reverse_holo'] ?? false,
     );
   }
 
@@ -225,6 +232,15 @@ class ScanMetadata {
       matchReason == 'set_name' ||
       matchReason == 'ptcgo_code' ||
       matchReason == 'unique_set_total';
+
+  /// Get suggested PrintingType based on OCR detection
+  /// Priority: 1st Edition > Reverse Holo > Foil > Normal
+  PrintingType get suggestedPrinting {
+    if (isFirstEdition) return PrintingType.firstEdition;
+    if (isReverseHolo) return PrintingType.reverseHolofoil;
+    if (isFoil) return PrintingType.foil;
+    return PrintingType.normal;
+  }
 }
 
 /// Result from card identification (OCR scan)

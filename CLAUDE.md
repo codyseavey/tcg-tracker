@@ -109,7 +109,7 @@ Environment variables:
 | `JustTCGService` | `internal/services/justtcg.go` | Condition-based pricing from JustTCG API |
 | `PriceService` | `internal/services/price_service.go` | Unified price fetching with fallback chain |
 | `TCGdexService` | `internal/services/tcgdex.go` | Pokemon card pricing fallback (TCGdex API) |
-| `PriceWorker` | `internal/services/price_worker.go` | Background price updates (20 cards/batch hourly) |
+| `PriceWorker` | `internal/services/price_worker.go` | Background price updates with priority queue (user requests, then collection) |
 | `OCRParser` | `internal/services/ocr_parser.go` | Parse OCR text to extract card details |
 | `ServerOCRService` | `internal/services/server_ocr.go` | Server-side OCR using identifier service (EasyOCR) |
 
@@ -169,15 +169,23 @@ Base URL: `http://localhost:8080/api`
 ## Important Implementation Details
 
 ### Price Caching
-- Condition-specific prices (NM, LP, MP, HP, DMG) are stored in `card_prices` table
+- Condition and printing-specific prices (NM, LP, MP, HP, DMG) stored in `card_prices` table
+- Prices keyed by card_id + condition + printing (Normal, Foil, 1st Edition, etc.)
 - Base prices (NM only) kept in `cards` table for backward compatibility
 - `PriceService` provides unified price fetching with fallback chain:
   1. Check database cache (fresh within 24 hours)
   2. Try JustTCG API (condition-specific pricing for Pokemon and MTG)
   3. Fallback to TCGdex (Pokemon) or Scryfall (MTG) for NM prices
   4. Return stale cached price if all else fails
-- Background worker updates 20 cards per batch hourly (both Pokemon and MTG)
-- Collection stats use condition-appropriate prices (e.g., LP card uses LP price)
+
+### Price Worker
+The background price worker (`PriceWorker`) updates prices with priority ordering:
+1. **User-requested refreshes** - Cards queued via `/cards/:id/refresh-price` endpoint
+2. **Collection cards without prices** - New additions needing initial pricing
+3. **Collection cards with oldest prices** - Stale cache refresh
+
+JustTCG batch API used for efficient updates (up to 20 cards per request with rate limiting).
+Collection stats use condition and printing-appropriate prices.
 
 ### OCR Card Matching
 The `OCRParser` extracts from scanned card images:
@@ -234,8 +242,16 @@ The Go backend can serve the Vue.js frontend from `FRONTEND_DIST_PATH`:
 
 SQLite database with GORM models in `internal/models/`:
 - `Card` - Card data with prices, images, metadata
-- `CardPrice` - Condition-specific prices (NM, LP, MP, HP, DMG) for each card/foil combo
-- `CollectionItem` - User's collection entries with quantity, condition
+- `CardPrice` - Condition and printing-specific prices (NM, LP, MP, HP, DMG) for each card/printing combo
+- `CollectionItem` - User's collection entries with quantity, condition, printing type
+
+### Printing Types
+Cards support multiple printing variants via the `PrintingType` enum:
+- `Normal` - Standard non-foil printing
+- `Foil` - Holographic/foil finish
+- `1st Edition` - First edition cards (Pokemon)
+- `Reverse Holofoil` - Reverse holo pattern
+- `Unlimited` - Unlimited edition (Pokemon)
 
 ## Pokemon Data
 

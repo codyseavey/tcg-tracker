@@ -83,11 +83,15 @@ func (h *CollectionHandler) AddToCollection(c *gin.Context) {
 	if condition == "" {
 		condition = models.ConditionNearMint
 	}
+	printing := req.Printing
+	if printing == "" {
+		printing = models.PrintingNormal
+	}
 
-	// Check if already in collection (same card, condition, foil, first_edition)
+	// Check if already in collection (same card, condition, printing)
 	var existingItem models.CollectionItem
-	err := db.Where("card_id = ? AND condition = ? AND foil = ? AND first_edition = ?",
-		req.CardID, condition, req.Foil, req.FirstEdition).
+	err := db.Where("card_id = ? AND condition = ? AND printing = ?",
+		req.CardID, condition, printing).
 		First(&existingItem).Error
 
 	if err == nil {
@@ -124,8 +128,7 @@ func (h *CollectionHandler) AddToCollection(c *gin.Context) {
 		CardID:           req.CardID,
 		Quantity:         quantity,
 		Condition:        condition,
-		Foil:             req.Foil,
-		FirstEdition:     req.FirstEdition,
+		Printing:         printing,
 		Notes:            req.Notes,
 		AddedAt:          time.Now(),
 		ScannedImagePath: scannedImagePath,
@@ -179,11 +182,8 @@ func (h *CollectionHandler) UpdateCollectionItem(c *gin.Context) {
 	if req.Condition != nil {
 		item.Condition = *req.Condition
 	}
-	if req.Foil != nil {
-		item.Foil = *req.Foil
-	}
-	if req.FirstEdition != nil {
-		item.FirstEdition = *req.FirstEdition
+	if req.Printing != nil {
+		item.Printing = *req.Printing
 	}
 	if req.Notes != nil {
 		item.Notes = *req.Notes
@@ -263,9 +263,13 @@ func (h *CollectionHandler) GetStats(c *gin.Context) {
 							ELSE 'NM'
 						END
 					 )
-					 AND cp.foil = collection_items.foil
+					 AND cp.printing = collection_items.printing
 					 LIMIT 1),
-					CASE WHEN collection_items.foil THEN cards.price_foil_usd ELSE cards.price_usd END
+					CASE 
+						WHEN collection_items.printing IN ('Foil', '1st Edition', 'Reverse Holofoil') 
+						THEN cards.price_foil_usd 
+						ELSE cards.price_usd 
+					END
 				) * collection_items.quantity
 			) as total_value
 		`).

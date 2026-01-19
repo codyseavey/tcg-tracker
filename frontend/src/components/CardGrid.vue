@@ -37,17 +37,19 @@ const emit = defineEmits(['select'])
           x{{ item.quantity }}
         </div>
         <div
-          v-if="item.foil"
-          class="absolute top-2 left-2 bg-yellow-400 text-yellow-900 text-xs font-bold px-2 py-1 rounded"
+          v-if="item.printing && item.printing !== 'Normal'"
+          class="absolute top-2 left-2 text-xs font-bold px-2 py-1 rounded"
+          :class="{
+            'bg-yellow-400 text-yellow-900': item.printing === 'Foil',
+            'bg-amber-600 text-white': item.printing === '1st Edition',
+            'bg-purple-500 text-white': item.printing === 'Reverse Holofoil',
+            'bg-gray-500 text-white': item.printing === 'Unlimited'
+          }"
         >
-          FOIL
-        </div>
-        <div
-          v-if="item.first_edition"
-          class="absolute top-2 left-2 bg-amber-600 text-white text-xs font-bold px-2 py-1 rounded"
-          :class="{ 'top-10': item.foil }"
-        >
-          1ST ED
+          {{ item.printing === 'Foil' ? 'FOIL' : 
+            item.printing === '1st Edition' ? '1ST ED' :
+            item.printing === 'Reverse Holofoil' ? 'REV HOLO' :
+            item.printing === 'Unlimited' ? 'UNLTD' : item.printing }}
         </div>
       </div>
       <div class="p-3">

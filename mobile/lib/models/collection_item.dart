@@ -1,13 +1,36 @@
 import 'card.dart';
 
+/// Printing type enum matching backend PrintingType
+enum PrintingType {
+  normal('Normal'),
+  foil('Foil'),
+  firstEdition('1st Edition'),
+  unlimited('Unlimited'),
+  reverseHolofoil('Reverse Holofoil');
+
+  final String value;
+  const PrintingType(this.value);
+
+  static PrintingType fromString(String? value) {
+    if (value == null || value.isEmpty) return PrintingType.normal;
+    return PrintingType.values.firstWhere(
+      (e) => e.value == value,
+      orElse: () => PrintingType.normal,
+    );
+  }
+
+  /// Returns true if this printing type should use foil pricing
+  bool get usesFoilPricing =>
+      this == PrintingType.foil || this == PrintingType.reverseHolofoil;
+}
+
 class CollectionItem {
   final int id;
   final String cardId;
   final CardModel card;
   final int quantity;
   final String condition;
-  final bool foil;
-  final bool firstEdition;
+  final PrintingType printing;
   final String? notes;
   final DateTime addedAt;
   final String? scannedImagePath;
@@ -18,8 +41,7 @@ class CollectionItem {
     required this.card,
     required this.quantity,
     required this.condition,
-    required this.foil,
-    this.firstEdition = false,
+    required this.printing,
     this.notes,
     required this.addedAt,
     this.scannedImagePath,
@@ -32,8 +54,7 @@ class CollectionItem {
       card: CardModel.fromJson(json['card'] ?? {}),
       quantity: json['quantity'] ?? 1,
       condition: json['condition'] ?? 'NM',
-      foil: json['foil'] ?? false,
-      firstEdition: json['first_edition'] ?? false,
+      printing: PrintingType.fromString(json['printing']),
       notes: json['notes'],
       addedAt: json['added_at'] != null
           ? DateTime.parse(json['added_at'])
@@ -44,7 +65,9 @@ class CollectionItem {
 
   /// Calculate total value of this item (quantity * appropriate price)
   double get totalValue {
-    final price = foil ? (card.priceFoilUsd ?? card.priceUsd) : card.priceUsd;
+    final price = printing.usesFoilPricing
+        ? (card.priceFoilUsd ?? card.priceUsd)
+        : card.priceUsd;
     return (price ?? 0) * quantity;
   }
 
@@ -55,9 +78,11 @@ class CollectionItem {
     return '\$${value.toStringAsFixed(2)}';
   }
 
-  /// Get display price (foil or regular based on this item's foil status)
+  /// Get display price (foil or regular based on this item's printing type)
   String get displayPrice {
-    final price = foil ? (card.priceFoilUsd ?? card.priceUsd) : card.priceUsd;
+    final price = printing.usesFoilPricing
+        ? (card.priceFoilUsd ?? card.priceUsd)
+        : card.priceUsd;
     if (price == null || price == 0) return 'N/A';
     return '\$${price.toStringAsFixed(2)}';
   }
@@ -69,8 +94,7 @@ class CollectionItem {
     CardModel? card,
     int? quantity,
     String? condition,
-    bool? foil,
-    bool? firstEdition,
+    PrintingType? printing,
     String? notes,
     DateTime? addedAt,
     String? scannedImagePath,
@@ -81,8 +105,7 @@ class CollectionItem {
       card: card ?? this.card,
       quantity: quantity ?? this.quantity,
       condition: condition ?? this.condition,
-      foil: foil ?? this.foil,
-      firstEdition: firstEdition ?? this.firstEdition,
+      printing: printing ?? this.printing,
       notes: notes ?? this.notes,
       addedAt: addedAt ?? this.addedAt,
       scannedImagePath: scannedImagePath ?? this.scannedImagePath,

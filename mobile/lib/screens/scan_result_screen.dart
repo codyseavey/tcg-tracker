@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../models/card.dart';
+import '../models/collection_item.dart' show PrintingType;
 import '../services/api_service.dart';
 import '../utils/constants.dart';
 import 'confirm_card_screen.dart';
@@ -32,8 +33,7 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
   late final ApiService _apiService;
   int _quantity = 1;
   late String _condition;
-  late bool _foil;
-  late bool _firstEdition;
+  late PrintingType _printing;
   bool _isAdding = false;
 
   bool _isBrowsing = false;
@@ -46,12 +46,9 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
   void initState() {
     super.initState();
     _apiService = widget.apiService ?? ApiService();
-    // Conservative foil pre-fill: only if high confidence (>= 0.8) or explicit isFoil from text
+    // Pre-fill printing type from scan metadata
     final meta = widget.scanMetadata;
-    final foilConfidence = meta?.foilConfidence ?? 0;
-    _foil = (foilConfidence >= 0.8) || (meta?.isFoil ?? false);
-    // Pre-fill first edition from detection
-    _firstEdition = meta?.isFirstEdition ?? false;
+    _printing = meta?.suggestedPrinting ?? PrintingType.normal;
     // Pre-fill condition based on image analysis suggested condition
     final suggested = meta?.suggestedCondition;
     _condition = (suggested != null && _conditions.contains(suggested))
@@ -201,8 +198,7 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
         card.id,
         quantity: _quantity,
         condition: _condition,
-        foil: _foil,
-        firstEdition: _firstEdition,
+        printing: _printing,
         scannedImageBytes: widget.scannedImageBytes,
       );
 
@@ -341,79 +337,50 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
                     ),
                   ],
                 ),
-                // Foil with detection indicator
-                SwitchListTile(
-                  title: Row(
-                    children: [
-                      const Text('Foil'),
-                      if (widget.scanMetadata?.isFoil == true ||
-                          (widget.scanMetadata?.foilConfidence ?? 0) >=
-                              0.5) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color:
-                                (widget.scanMetadata?.foilConfidence ?? 0) >=
-                                    0.8
-                                ? Theme.of(
-                                    context,
-                                  ).colorScheme.tertiaryContainer
-                                : Colors.amber.shade100,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Text(
-                            (widget.scanMetadata?.foilConfidence ?? 0) >= 0.8
-                                ? 'Detected'
-                                : 'Maybe (${((widget.scanMetadata?.foilConfidence ?? 0) * 100).toInt()}%)',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color:
-                                  (widget.scanMetadata?.foilConfidence ?? 0) >=
-                                      0.8
-                                  ? Theme.of(
-                                      context,
-                                    ).colorScheme.onTertiaryContainer
-                                  : Colors.amber.shade900,
-                            ),
-                          ),
+                // Printing type dropdown
+                Row(
+                  children: [
+                    const Text('Printing:'),
+                    if (widget.scanMetadata?.suggestedPrinting != null &&
+                        widget.scanMetadata!.suggestedPrinting !=
+                            PrintingType.normal) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
                         ),
-                      ],
-                    ],
-                  ),
-                  value: _foil,
-                  onChanged: (value) => setModalState(() => _foil = value),
-                ),
-                // First Edition toggle (mainly for Pokemon Base Set era)
-                SwitchListTile(
-                  title: Row(
-                    children: [
-                      const Text('1st Edition'),
-                      if (widget.scanMetadata?.isFirstEdition == true) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 2,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.amber.shade700,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Text(
-                            'Detected',
-                            style: TextStyle(fontSize: 12, color: Colors.white),
-                          ),
+                        decoration: BoxDecoration(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.tertiaryContainer,
+                          borderRadius: BorderRadius.circular(8),
                         ),
-                      ],
+                        child: const Text(
+                          'Auto',
+                          style: TextStyle(fontSize: 10, color: Colors.white),
+                        ),
+                      ),
                     ],
-                  ),
-                  value: _firstEdition,
-                  onChanged: (value) =>
-                      setModalState(() => _firstEdition = value),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: DropdownButton<PrintingType>(
+                        value: _printing,
+                        isExpanded: true,
+                        items: PrintingType.values.map((p) {
+                          return DropdownMenuItem(
+                            value: p,
+                            child: Text(_getPrintingDisplayName(p)),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          if (value != null) {
+                            setModalState(() => _printing = value);
+                          }
+                        },
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 16),
                 FilledButton(
@@ -828,6 +795,21 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
 
   String _getConditionDescription(String condition) {
     return CardConditions.getLabel(condition);
+  }
+
+  String _getPrintingDisplayName(PrintingType printing) {
+    switch (printing) {
+      case PrintingType.normal:
+        return 'Normal';
+      case PrintingType.foil:
+        return 'Foil / Holo';
+      case PrintingType.firstEdition:
+        return '1st Edition';
+      case PrintingType.reverseHolofoil:
+        return 'Reverse Holo';
+      case PrintingType.unlimited:
+        return 'Unlimited';
+    }
   }
 
   Color _getConfidenceColor(BuildContext context, double confidence) {

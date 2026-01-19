@@ -10,18 +10,16 @@ class CollectionCard extends StatelessWidget {
   final CardModel? card;
   final VoidCallback? onTap;
 
-  const CollectionCard({
-    super.key,
-    this.collectionItem,
-    this.card,
-    this.onTap,
-  }) : assert(collectionItem != null || card != null,
-            'Either collectionItem or card must be provided');
+  const CollectionCard({super.key, this.collectionItem, this.card, this.onTap})
+    : assert(
+        collectionItem != null || card != null,
+        'Either collectionItem or card must be provided',
+      );
 
   CardModel get _card => collectionItem?.card ?? card!;
   bool get _isCollectionItem => collectionItem != null;
   int? get _quantity => collectionItem?.quantity;
-  bool get _isFoil => collectionItem?.foil ?? false;
+  bool get _isFoilVariant => collectionItem?.printing.usesFoilPricing ?? false;
 
   @override
   Widget build(BuildContext context) {
@@ -67,8 +65,8 @@ class CollectionCard extends StatelessWidget {
                         ),
                       ),
                     ),
-                  // Foil indicator
-                  if (_isFoil)
+                  // Foil indicator (shows for any foil-priced variant)
+                  if (_isFoilVariant)
                     Positioned(
                       top: 4,
                       left: 4,
@@ -164,7 +162,9 @@ class CollectionCard extends StatelessWidget {
                       ),
                     ),
                     // Total value if quantity > 1
-                    if (_isCollectionItem && _quantity != null && _quantity! > 1)
+                    if (_isCollectionItem &&
+                        _quantity != null &&
+                        _quantity! > 1)
                       Text(
                         'Total: ${collectionItem!.displayTotalValue}',
                         style: theme.textTheme.bodySmall?.copyWith(
@@ -199,9 +199,7 @@ class CollectionCard extends StatelessWidget {
       fit: BoxFit.cover,
       placeholder: (context, url) => Container(
         color: colorScheme.surfaceContainerHighest,
-        child: const Center(
-          child: CircularProgressIndicator(strokeWidth: 2),
-        ),
+        child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
       ),
       errorWidget: (context, url, error) => Container(
         color: colorScheme.surfaceContainerHighest,

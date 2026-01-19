@@ -90,7 +90,7 @@ export const collectionService = {
       card_id: cardId,
       quantity: options.quantity || 1,
       condition: options.condition || 'NM',
-      foil: options.foil || false,
+      printing: options.printing || 'Normal',
       notes: options.notes || ''
     })
     return response.data
