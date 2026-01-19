@@ -40,6 +40,12 @@ func Initialize(dbPath string) error {
 
 	log.Println("Database connected successfully")
 
+	// Pre-migration: Clean up any duplicate card_prices before adding unique constraint
+	// This handles existing databases that may have duplicates from before the constraint was added
+	if err := cleanupDuplicateCardPrices(DB); err != nil {
+		log.Printf("Warning: failed to cleanup duplicate card prices: %v", err)
+	}
+
 	// Auto-migrate the schema
 	err = DB.AutoMigrate(&models.Card{}, &models.CollectionItem{}, &models.CardPrice{})
 	if err != nil {

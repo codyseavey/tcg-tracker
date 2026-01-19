@@ -6,6 +6,41 @@ import (
 	"gorm.io/gorm"
 )
 
+// cleanupDuplicateCardPrices removes duplicate card_prices entries before the unique constraint is added
+// This runs BEFORE AutoMigrate to prevent constraint violations
+func cleanupDuplicateCardPrices(db *gorm.DB) error {
+	// Check if the table exists
+	if !db.Migrator().HasTable("card_prices") {
+		return nil // No table, no duplicates to clean
+	}
+
+	// First, normalize NULL/empty printing values to 'Normal'
+	result := db.Exec(`UPDATE card_prices SET printing = 'Normal' WHERE printing IS NULL OR printing = ''`)
+	if result.Error != nil {
+		log.Printf("Warning: failed to normalize printing values: %v", result.Error)
+	}
+
+	// Find and remove duplicates, keeping the most recently updated row
+	// This uses a subquery to identify duplicates and delete all but the newest
+	result = db.Exec(`
+		DELETE FROM card_prices 
+		WHERE id NOT IN (
+			SELECT MAX(id) 
+			FROM card_prices 
+			GROUP BY card_id, condition, printing
+		)
+	`)
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected > 0 {
+		log.Printf("Cleaned up %d duplicate card_prices entries", result.RowsAffected)
+	}
+
+	return nil
+}
+
 // RunMigrations runs any custom data migrations after schema changes
 func RunMigrations(db *gorm.DB) error {
 	if err := migratePrintingField(db); err != nil {
