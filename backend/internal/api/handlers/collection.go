@@ -19,14 +19,16 @@ type CollectionHandler struct {
 	pokemonService      *services.PokemonHybridService
 	imageStorageService *services.ImageStorageService
 	snapshotService     *services.SnapshotService
+	priceWorker         *services.PriceWorker
 }
 
-func NewCollectionHandler(scryfall *services.ScryfallService, pokemon *services.PokemonHybridService, imageStorage *services.ImageStorageService, snapshot *services.SnapshotService) *CollectionHandler {
+func NewCollectionHandler(scryfall *services.ScryfallService, pokemon *services.PokemonHybridService, imageStorage *services.ImageStorageService, snapshot *services.SnapshotService, priceWorker *services.PriceWorker) *CollectionHandler {
 	return &CollectionHandler{
 		scryfallService:     scryfall,
 		pokemonService:      pokemon,
 		imageStorageService: imageStorage,
 		snapshotService:     snapshot,
+		priceWorker:         priceWorker,
 	}
 }
 
@@ -467,56 +469,94 @@ func (h *CollectionHandler) GetStats(c *gin.Context) {
 	c.JSON(http.StatusOK, stats)
 }
 
+// RefreshPrices queues all collection cards for price refresh via the PriceWorker.
+// Uses JustTCG as the sole price source for consistent, condition-based pricing.
 func (h *CollectionHandler) RefreshPrices(c *gin.Context) {
+	if h.priceWorker == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "price worker not available"})
+		return
+	}
+
 	db := database.GetDB()
 
-	var cards []models.Card
-	if err := db.Find(&cards).Error; err != nil {
+	// Get unique card IDs from collection
+	var cardIDs []string
+	if err := db.Model(&models.CollectionItem{}).
+		Distinct("card_id").
+		Pluck("card_id", &cardIDs).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	updated := 0
-	for _, card := range cards {
-		var updatedCard *models.Card
-		var err error
-
-		switch card.Game {
-		case models.GameMTG:
-			updatedCard, err = h.scryfallService.GetCard(card.ID)
-		case models.GamePokemon:
-			updatedCard, err = h.pokemonService.GetCard(card.ID)
-		}
-
-		if err != nil || updatedCard == nil {
-			continue
-		}
-
-		card.PriceUSD = updatedCard.PriceUSD
-		card.PriceFoilUSD = updatedCard.PriceFoilUSD
-		card.PriceUpdatedAt = updatedCard.PriceUpdatedAt
-		card.PriceSource = "api"
-
-		if err := db.Save(&card).Error; err == nil {
-			updated++
-		}
+	// Queue all collection cards for refresh
+	queued := 0
+	for _, cardID := range cardIDs {
+		h.priceWorker.QueueRefresh(cardID)
+		queued++
 	}
 
-	c.JSON(http.StatusOK, gin.H{"updated": updated})
+	status := h.priceWorker.GetStatus()
+	c.JSON(http.StatusOK, gin.H{
+		"queued":           queued,
+		"queue_size":       status.QueueSize,
+		"next_update_time": status.NextUpdateTime,
+		"daily_remaining":  status.Remaining,
+	})
 }
 
 // GetGroupedCollection returns collection items grouped by card_id
 // Each group contains summary info plus all individual items for that card
+//
+// Query parameters:
+// - game: filter by game ("pokemon" or "mtg")
+// - q: search by card name or set name (case-insensitive)
+// - sort: sort order ("added_at", "name", "value", "price_updated") - default "added_at"
 func (h *CollectionHandler) GetGroupedCollection(c *gin.Context) {
 	db := database.GetDB()
 
 	var items []models.CollectionItem
-	query := db.Preload("Card").Preload("Card.Prices").Order("added_at DESC")
+	query := db.Preload("Card").Preload("Card.Prices")
+
+	// Always join cards table for filtering/sorting
+	needsJoin := false
 
 	// Optional game filter
 	if game := c.Query("game"); game != "" {
-		query = query.Joins("JOIN cards ON cards.id = collection_items.card_id").
-			Where("cards.game = ?", game)
+		if !needsJoin {
+			query = query.Joins("JOIN cards ON cards.id = collection_items.card_id")
+			needsJoin = true
+		}
+		query = query.Where("cards.game = ?", game)
+	}
+
+	// Search filter (name or set)
+	if search := c.Query("q"); search != "" {
+		if !needsJoin {
+			query = query.Joins("JOIN cards ON cards.id = collection_items.card_id")
+			needsJoin = true
+		}
+		searchPattern := "%" + search + "%"
+		query = query.Where("cards.name LIKE ? OR cards.set_name LIKE ? OR cards.set_code LIKE ?",
+			searchPattern, searchPattern, searchPattern)
+	}
+
+	// Sorting
+	sortBy := c.DefaultQuery("sort", "added_at")
+	switch sortBy {
+	case "name":
+		if !needsJoin {
+			query = query.Joins("JOIN cards ON cards.id = collection_items.card_id")
+		}
+		query = query.Order("cards.name ASC")
+	case "price_updated":
+		if !needsJoin {
+			query = query.Joins("JOIN cards ON cards.id = collection_items.card_id")
+		}
+		query = query.Order("cards.price_updated_at DESC NULLS LAST")
+	case "added_at":
+		fallthrough
+	default:
+		query = query.Order("collection_items.added_at DESC")
 	}
 
 	if err := query.Find(&items).Error; err != nil {

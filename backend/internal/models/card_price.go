@@ -50,7 +50,7 @@ type CardPrice struct {
 	Condition      PriceCondition `json:"condition" gorm:"not null;uniqueIndex:idx_card_cond_print"`
 	Printing       PrintingType   `json:"printing" gorm:"not null;uniqueIndex:idx_card_cond_print;default:'Normal'"`
 	PriceUSD       float64        `json:"price_usd"`
-	Source         string         `json:"source"` // "justtcg", "tcgdex", "scryfall"
+	Source         string         `json:"source"` // "justtcg" (sole price source)
 	PriceUpdatedAt *time.Time     `json:"price_updated_at"`
 	CreatedAt      time.Time      `json:"created_at"`
 	UpdatedAt      time.Time      `json:"updated_at"`

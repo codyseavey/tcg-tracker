@@ -20,9 +20,14 @@ A trading card collection tracker for Magic: The Gathering and Pokemon cards wit
     ┌────────────────┼───────────────┼────────────────┐
     │                │               │                │
 ┌───▼───┐      ┌─────▼─────┐   ┌─────▼─────┐   ┌──────▼──────┐
-│SQLite │      │ Scryfall  │   │Pokemon TCG│   │ Identifier  │
-│  DB   │      │   API     │   │    API    │   │   Service   │
+│SQLite │      │ Scryfall  │   │ JustTCG   │   │ Identifier  │
+│  DB   │      │   API     │   │   API     │   │   Service   │
 └───────┘      └───────────┘   └───────────┘   └─────────────┘
+                                      │
+                               ┌──────▼──────┐
+                               │ Prometheus  │───► Grafana
+                               │  /metrics   │
+                               └─────────────┘
 ```
 
 ## Features
@@ -33,6 +38,7 @@ A trading card collection tracker for Magic: The Gathering and Pokemon cards wit
 - **Price Tracking**: View current market prices with automatic refresh
 - **Mobile Scanning**: Use your phone camera to scan and identify cards
 - **Fast Card Matching**: Inverted index enables sub-2ms card matching for good OCR
+- **Prometheus Metrics**: Export metrics for monitoring with Grafana dashboards
 
 ## Prerequisites
 
@@ -61,6 +67,7 @@ Services will be available at:
 - Frontend: http://localhost:3000
 - Backend API: http://localhost:8080
 - Identifier: http://localhost:8099
+- Prometheus Metrics: http://localhost:8080/metrics
 
 ### Docker Images
 
@@ -99,6 +106,8 @@ Environment variables:
 - `POKEMON_DATA_DIR` - Pokemon TCG data directory
 - `IDENTIFIER_SERVICE_URL` - Identifier service URL (default: http://127.0.0.1:8099)
 - `ADMIN_KEY` - Admin key for collection modification (optional, auth disabled if not set)
+- `JUSTTCG_API_KEY` - JustTCG API key for condition-based pricing
+- `JUSTTCG_DAILY_LIMIT` - Daily API request limit (default: 100)
 
 #### 2. Frontend (Vue.js Web App)
 
@@ -158,6 +167,10 @@ Configure the server URL in settings to point to your backend IP.
 
 *🔒 = Requires admin key if `ADMIN_KEY` is set*
 
+### Monitoring
+- `GET /health` - Service health check
+- `GET /metrics` - Prometheus metrics endpoint
+
 ### Identifier Service (port 8099)
 - `GET /health` - Service health and GPU status
 - `POST /ocr` - OCR text extraction with auto-rotation
@@ -171,6 +184,7 @@ tcg-tracker/
 │   └── internal/
 │       ├── api/             # HTTP handlers and routes
 │       ├── database/        # SQLite setup
+│       ├── metrics/         # Prometheus metrics
 │       ├── models/          # Data models
 │       └── services/        # External API services
 ├── frontend/                # Vue.js web application
@@ -187,6 +201,8 @@ tcg-tracker/
 │       ├── models/          # Data models
 │       ├── screens/         # App screens
 │       └── services/        # API and OCR services
+├── monitoring/              # Monitoring configuration
+│   └── grafana-dashboard.json # Pre-built Grafana dashboard
 └── deployment/              # Deployment configs
     ├── tcg-tracker.service  # Backend systemd service
     └── tcg-identifier.service # Identifier systemd service
@@ -208,7 +224,27 @@ The system uses a two-tier OCR approach for card identification:
 - Rate limit: 10 requests/second
 - Documentation: https://scryfall.com/docs/api
 
-### Pokemon TCG API
-- API key recommended for higher rate limits
-- Free tier: 1000 requests/day
-- Get API key: https://dev.pokemontcg.io/
+### JustTCG (Pricing)
+- Provides condition-specific pricing for Pokemon cards
+- API key required
+- Daily limit configurable via `JUSTTCG_DAILY_LIMIT`
+
+## Monitoring
+
+The backend exposes Prometheus metrics at `/metrics` for monitoring:
+
+### Available Metrics
+- `tcg_collection_cards_total` - Total cards in collection
+- `tcg_collection_value_usd` - Total collection value
+- `tcg_price_updates_total` - Price updates counter
+- `tcg_price_queue_size` - Cards waiting for price refresh
+- `tcg_justtcg_quota_remaining` - API quota remaining
+- `tcg_http_requests_total` - HTTP request counter by path/method/status
+- `tcg_http_request_duration_seconds` - Request latency histogram
+
+### Grafana Dashboard
+Import the pre-built dashboard from `monitoring/grafana-dashboard.json` to visualize:
+- Collection overview (card count, total value, breakdown by game)
+- Price update status (queue size, update rate, batch duration)
+- JustTCG API quota usage
+- HTTP traffic and latency

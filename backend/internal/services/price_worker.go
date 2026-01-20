@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/codyseavey/tcg-tracker/backend/internal/database"
+	"github.com/codyseavey/tcg-tracker/backend/internal/metrics"
 	"github.com/codyseavey/tcg-tracker/backend/internal/models"
 )
 
@@ -235,6 +236,8 @@ func (w *PriceWorker) UpdateBatch() (updated int, err error) {
 
 // batchUpdatePrices uses the batch API to update all cards at once
 func (w *PriceWorker) batchUpdatePrices(cards []models.Card) (int, error) {
+	start := time.Now()
+
 	// Build lookup requests
 	lookups := make([]CardLookup, len(cards))
 	cardMap := make(map[string]*models.Card) // Keyed by CardID only
@@ -303,6 +306,19 @@ func (w *PriceWorker) batchUpdatePrices(cards []models.Card) (int, error) {
 	w.cardsUpdatedToday += updated
 	w.lastUpdateTime = time.Now()
 	w.mu.Unlock()
+
+	// Update Prometheus metrics
+	metrics.PriceUpdatesTotal.Add(float64(updated))
+	metrics.PriceUpdatesToday.Set(float64(w.cardsUpdatedToday))
+	metrics.PriceQueueSize.Set(float64(w.GetQueueSize()))
+	metrics.PriceBatchDuration.Observe(time.Since(start).Seconds())
+
+	// Update JustTCG quota metrics
+	metrics.JustTCGQuotaRemaining.Set(float64(w.priceService.GetJustTCGRequestsRemaining()))
+	metrics.JustTCGQuotaLimit.Set(float64(w.priceService.GetJustTCGDailyLimit()))
+
+	// Update collection metrics (includes updated values)
+	metrics.UpdateCollectionMetrics(db)
 
 	log.Printf("Price worker: batch updated %d card prices", updated)
 	return updated, nil

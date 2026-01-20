@@ -45,6 +45,28 @@ const formatResetTime = (dateString) => {
   return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
 }
 
+const formatNextUpdate = computed(() => {
+  if (!priceStatus.value?.next_update_time) return 'Unknown'
+  const next = new Date(priceStatus.value.next_update_time)
+  const now = new Date()
+  const diffMs = next - now
+
+  if (diffMs <= 0) return 'Any moment now'
+  if (diffMs < 60000) return 'Less than a minute'
+
+  const diffMins = Math.round(diffMs / 60000)
+  if (diffMins === 1) return '1 minute'
+  return `${diffMins} minutes`
+})
+
+const lastUpdateTime = computed(() => {
+  if (!priceStatus.value?.last_update_time) return null
+  const last = new Date(priceStatus.value.last_update_time)
+  // Check if it's a zero time (Go's zero value)
+  if (last.getFullYear() < 2000) return null
+  return last.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+})
+
 onMounted(async () => {
   await Promise.all([
     store.fetchCollection(),
@@ -96,24 +118,51 @@ const handlePriceUpdated = (updatedCard) => {
       </div>
 
       <div v-if="priceStatus" class="mt-4 bg-white dark:bg-gray-800 rounded-lg shadow p-4">
-        <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Pokemon Price API Quota</h3>
-        <div class="flex items-center gap-4">
-          <div class="flex-1">
-            <div class="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-              <div
-                :class="quotaColor"
-                :style="{ width: quotaPercentage + '%' }"
-                class="h-full transition-all duration-300"
-              ></div>
-            </div>
+        <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Price Update Status</h3>
+
+        <!-- Next Update Countdown -->
+        <div class="flex items-center justify-between mb-3 p-2 bg-blue-50 dark:bg-blue-900/20 rounded">
+          <span class="text-sm text-gray-600 dark:text-gray-400">Next price update</span>
+          <span class="text-sm font-medium text-blue-600 dark:text-blue-400">{{ formatNextUpdate }}</span>
+        </div>
+
+        <!-- Update Stats Grid -->
+        <div class="grid grid-cols-3 gap-3 mb-3">
+          <div class="text-center p-2 bg-gray-50 dark:bg-gray-700/50 rounded">
+            <div class="text-lg font-semibold text-gray-800 dark:text-white">{{ priceStatus.cards_updated_today || 0 }}</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400">Updated today</div>
           </div>
-          <div class="text-sm text-gray-600 dark:text-gray-400">
-            {{ quotaRemaining }} / {{ quotaDailyLimit }} remaining
+          <div class="text-center p-2 bg-gray-50 dark:bg-gray-700/50 rounded">
+            <div class="text-lg font-semibold text-gray-800 dark:text-white">{{ priceStatus.queue_size || 0 }}</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400">In queue</div>
+          </div>
+          <div class="text-center p-2 bg-gray-50 dark:bg-gray-700/50 rounded">
+            <div class="text-lg font-semibold text-gray-800 dark:text-white">{{ priceStatus.batch_size || 20 }}</div>
+            <div class="text-xs text-gray-500 dark:text-gray-400">Per batch</div>
           </div>
         </div>
-        <p class="text-xs text-gray-500 dark:text-gray-500 mt-1">
-          Resets at {{ formatResetTime(priceStatus.resets_at) }}
-        </p>
+
+        <!-- API Quota Bar -->
+        <div class="mb-2">
+          <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
+            <span>JustTCG API Quota</span>
+            <span>{{ quotaRemaining }} / {{ quotaDailyLimit }} remaining</span>
+          </div>
+          <div class="h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+            <div
+              :class="quotaColor"
+              :style="{ width: quotaPercentage + '%' }"
+              class="h-full transition-all duration-300"
+            ></div>
+          </div>
+        </div>
+
+        <!-- Footer Info -->
+        <div class="flex items-center justify-between text-xs text-gray-500 dark:text-gray-500">
+          <span v-if="lastUpdateTime">Last update: {{ lastUpdateTime }}</span>
+          <span v-else>No updates yet</span>
+          <span>Quota resets at {{ formatResetTime(priceStatus.resets_at) }}</span>
+        </div>
       </div>
     </div>
 

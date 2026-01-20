@@ -22,12 +22,11 @@ import (
 const pokemonDataURL = "https://github.com/PokemonTCG/pokemon-tcg-data/archive/refs/heads/master.zip"
 
 type PokemonHybridService struct {
-	tcgdexService *TCGdexService
-	sets          map[string]LocalSet
-	cardIndex     map[string][]int // name -> card indices for fast lookup
-	wordIndex     map[string][]int // word -> card indices for full-text search
-	cards         []LocalPokemonCard
-	mu            sync.RWMutex
+	sets      map[string]LocalSet
+	cardIndex map[string][]int // name -> card indices for fast lookup
+	wordIndex map[string][]int // word -> card indices for full-text search
+	cards     []LocalPokemonCard
+	mu        sync.RWMutex
 }
 
 // LocalAttack represents an attack on a Pokemon card
@@ -189,11 +188,10 @@ func extractIndexWords(text string) []string {
 
 func NewPokemonHybridService(dataDir string) (*PokemonHybridService, error) {
 	service := &PokemonHybridService{
-		cards:         make([]LocalPokemonCard, 0),
-		sets:          make(map[string]LocalSet),
-		cardIndex:     make(map[string][]int),
-		wordIndex:     make(map[string][]int),
-		tcgdexService: NewTCGdexService(),
+		cards:     make([]LocalPokemonCard, 0),
+		sets:      make(map[string]LocalSet),
+		cardIndex: make(map[string][]int),
+		wordIndex: make(map[string][]int),
 	}
 
 	if err := service.loadData(dataDir); err != nil {
@@ -373,11 +371,8 @@ func (s *PokemonHybridService) SearchCards(query string) (*models.CardSearchResu
 		cards = append(cards, card)
 	}
 
-	// Load cached prices only (fast) - don't block on API calls
+	// Load cached prices only (fast) - PriceWorker handles updates via JustTCG
 	s.loadCachedPrices(cards)
-
-	// Enrich remaining cards with prices in background (non-blocking)
-	go s.enrichWithPricesAsync(cards)
 
 	return &models.CardSearchResult{
 		Cards:      cards,
@@ -415,49 +410,9 @@ func (s *PokemonHybridService) loadCachedPrices(cards []models.Card) {
 	}
 }
 
-// enrichWithPricesAsync fetches prices from API in background and updates database.
-// This function only updates the database - it does not modify the input slice.
-// Card IDs are copied to avoid any race conditions with the caller.
-func (s *PokemonHybridService) enrichWithPricesAsync(cards []models.Card) {
-	// Copy card IDs and price sources to avoid race conditions
-	type cardInfo struct {
-		id          string
-		priceSource string
-	}
-	cardInfos := make([]cardInfo, len(cards))
-	for i, c := range cards {
-		cardInfos[i] = cardInfo{id: c.ID, priceSource: c.PriceSource}
-	}
-
-	db := database.GetDB()
-
-	for _, info := range cardInfos {
-		if info.priceSource == "cached" {
-			continue // Already have fresh price
-		}
-
-		// Fetch price from TCGdex
-		priceCard, err := s.tcgdexService.GetCard(info.id)
-		if err != nil {
-			log.Printf("Failed to fetch price for %s: %v", info.id, err)
-			continue
-		}
-
-		if priceCard != nil && (priceCard.PriceUSD > 0 || priceCard.PriceFoilUSD > 0) {
-			now := time.Now()
-			// Update the database directly instead of modifying the input slice
-			if err := db.Model(&models.Card{}).Where("id = ?", info.id).Updates(map[string]interface{}{
-				"price_usd":        priceCard.PriceUSD,
-				"price_foil_usd":   priceCard.PriceFoilUSD,
-				"price_updated_at": &now,
-				"last_price_check": &now,
-				"price_source":     "tcgdex",
-			}).Error; err != nil {
-				log.Printf("Failed to save price for %s: %v", info.id, err)
-			}
-		}
-	}
-}
+// Note: Price fetching is now handled exclusively by the PriceWorker using JustTCG.
+// Cards are returned with cached prices or "pending" status, and the PriceWorker
+// updates them in the background.
 
 func (s *PokemonHybridService) GetCard(id string) (*models.Card, error) {
 	s.mu.RLock()
@@ -466,45 +421,29 @@ func (s *PokemonHybridService) GetCard(id string) (*models.Card, error) {
 	db := database.GetDB()
 	cacheThreshold := 24 * time.Hour
 
-	// Find card by ID
+	// Find card by ID in local data
 	for _, localCard := range s.cards {
 		if localCard.ID == id {
 			card := s.convertToCard(localCard)
 
-			// First check if we have a cached price
+			// Load cached price from database - PriceWorker handles updates via JustTCG
 			var cachedCard models.Card
 			if err := db.First(&cachedCard, "id = ?", id).Error; err == nil {
+				card.PriceUSD = cachedCard.PriceUSD
+				card.PriceFoilUSD = cachedCard.PriceFoilUSD
+				card.PriceUpdatedAt = cachedCard.PriceUpdatedAt
+
 				if cachedCard.PriceUpdatedAt != nil && time.Since(*cachedCard.PriceUpdatedAt) < cacheThreshold {
-					// Use cached price
-					card.PriceUSD = cachedCard.PriceUSD
-					card.PriceFoilUSD = cachedCard.PriceFoilUSD
-					card.PriceUpdatedAt = cachedCard.PriceUpdatedAt
 					card.PriceSource = "cached"
-					return &card, nil
+				} else if cachedCard.PriceUSD > 0 || cachedCard.PriceFoilUSD > 0 {
+					card.PriceSource = "stale"
+				} else {
+					card.PriceSource = "pending"
 				}
-			}
-
-			// Fetch price from TCGdex (no rate limits)
-			priceCard, err := s.tcgdexService.GetCard(id)
-			if err != nil {
-				log.Printf("Failed to fetch price for %s: %v", id, err)
-				card.PriceSource = "error"
-				db.Save(&card)
-				return &card, nil
-			}
-
-			if priceCard != nil && (priceCard.PriceUSD > 0 || priceCard.PriceFoilUSD > 0) {
-				now := time.Now()
-				card.PriceUSD = priceCard.PriceUSD
-				card.PriceFoilUSD = priceCard.PriceFoilUSD
-				card.PriceUpdatedAt = &now
-				card.LastPriceCheck = &now
-				card.PriceSource = "tcgdex"
 			} else {
-				card.PriceSource = "not_found"
+				card.PriceSource = "pending"
 			}
 
-			db.Save(&card)
 			return &card, nil
 		}
 	}

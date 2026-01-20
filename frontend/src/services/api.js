@@ -129,11 +129,19 @@ export const collectionService = {
   /**
    * Get collection items grouped by card_id
    * Returns array of grouped items with total quantities, variants, and scans info
+   *
+   * @param {Object} options - Filter options
+   * @param {string} [options.game] - Filter by game ('pokemon' or 'mtg')
+   * @param {string} [options.q] - Search by card name or set
+   * @param {string} [options.sort] - Sort by ('added_at', 'name', 'price_updated')
    */
-  async getGrouped(game = null) {
-    const response = await api.get('/collection/grouped', {
-      params: game ? { game } : {}
-    })
+  async getGrouped(options = {}) {
+    const params = {}
+    if (options.game) params.game = options.game
+    if (options.q) params.q = options.q
+    if (options.sort) params.sort = options.sort
+
+    const response = await api.get('/collection/grouped', { params })
     return response.data
   },
 

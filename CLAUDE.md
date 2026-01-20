@@ -107,9 +107,8 @@ Environment variables:
 |---------|------|---------|
 | `PokemonHybridService` | `internal/services/pokemon_hybrid.go` | Pokemon card search with local data |
 | `ScryfallService` | `internal/services/scryfall.go` | MTG card search via Scryfall API |
-| `JustTCGService` | `internal/services/justtcg.go` | Condition-based pricing from JustTCG API |
+| `JustTCGService` | `internal/services/justtcg.go` | Condition-based pricing from JustTCG API (sole price source) |
 | `PriceService` | `internal/services/price_service.go` | Unified price fetching from JustTCG |
-| `TCGdexService` | `internal/services/tcgdex.go` | Pokemon card metadata (used by PokemonHybridService) |
 | `PriceWorker` | `internal/services/price_worker.go` | Background price updates with priority queue (user requests, then collection) |
 | `OCRParser` | `internal/services/ocr_parser.go` | Parse OCR text to extract card details |
 | `ServerOCRService` | `internal/services/server_ocr.go` | Server-side OCR using identifier service (EasyOCR) |
@@ -149,18 +148,19 @@ Base URL: `http://localhost:8080/api`
 
 ### Collection
 - `GET /collection` - Get user's collection (flat list)
-- `GET /collection/grouped` - Get collection grouped by card_id with variants summary
+- `GET /collection/grouped?q=<search>&game=<pokemon|mtg>&sort=<added_at|name|price_updated>` - Get collection grouped by card_id with variants summary (supports search and sorting)
 - `POST /collection` - Add card to collection (🔒 requires admin key)
 - `PUT /collection/:id` - Update collection item with smart split/merge (🔒 requires admin key)
 - `DELETE /collection/:id` - Remove from collection (🔒 requires admin key)
 - `GET /collection/stats` - Get collection statistics
-- `POST /collection/refresh-prices` - Queue background price refresh (🔒 requires admin key)
+- `POST /collection/refresh-prices` - Queue all collection cards for background price refresh (🔒 requires admin key)
 
 ### Prices
-- `GET /prices/status` - Get API quota status
+- `GET /prices/status` - Get API quota status and next update time
 
-### Health
+### Health & Monitoring
 - `GET /health` - Health check
+- `GET /metrics` - Prometheus metrics endpoint (for Grafana)
 
 ### Identifier Service (port 8099)
 - `GET /health` - Service health and GPU status

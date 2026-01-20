@@ -8,8 +8,10 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/codyseavey/tcg-tracker/backend/internal/api/handlers"
+	"github.com/codyseavey/tcg-tracker/backend/internal/metrics"
 	"github.com/codyseavey/tcg-tracker/backend/internal/middleware"
 	"github.com/codyseavey/tcg-tracker/backend/internal/services"
 )
@@ -33,9 +35,12 @@ func SetupRouter(scryfallService *services.ScryfallService, pokemonService *serv
 	config.AllowCredentials = false // Explicitly set
 	router.Use(cors.New(config))
 
+	// Prometheus metrics middleware (must be before routes)
+	router.Use(metrics.HTTPMetrics())
+
 	// Initialize handlers
 	cardHandler := handlers.NewCardHandler(scryfallService, pokemonService)
-	collectionHandler := handlers.NewCollectionHandler(scryfallService, pokemonService, imageStorageService, snapshotService)
+	collectionHandler := handlers.NewCollectionHandler(scryfallService, pokemonService, imageStorageService, snapshotService, priceWorker)
 	priceHandler := handlers.NewPriceHandler(priceWorker, priceService)
 
 	// Serve scanned images
@@ -95,6 +100,9 @@ func SetupRouter(scryfallService *services.ScryfallService, pokemonService *serv
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(200, gin.H{"status": "ok"})
 	})
+
+	// Prometheus metrics endpoint
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
 	// Serve frontend static files
 	if serveFrontend {

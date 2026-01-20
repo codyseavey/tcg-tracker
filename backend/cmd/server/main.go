@@ -30,7 +30,7 @@ func main() {
 	// Initialize services
 	scryfallService := services.NewScryfallService()
 
-	// Initialize Pokemon hybrid service (local data + TCGdex for prices)
+	// Initialize Pokemon hybrid service (local data, prices via JustTCG PriceWorker)
 	dataDir := os.Getenv("POKEMON_DATA_DIR")
 	if dataDir == "" {
 		dataDir = "./data"

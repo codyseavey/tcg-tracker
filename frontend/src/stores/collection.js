@@ -50,12 +50,16 @@ export const useCollectionStore = defineStore('collection', {
     /**
      * Fetch collection grouped by card_id
      * This is the primary method for displaying collection
+     * @param {Object} options - Filter options
+     * @param {string} [options.game] - Filter by game ('pokemon' or 'mtg')
+     * @param {string} [options.q] - Search by card name or set
+     * @param {string} [options.sort] - Sort by ('added_at', 'name', 'price_updated')
      */
-    async fetchGroupedCollection(game = null) {
+    async fetchGroupedCollection(options = {}) {
       this.loading = true
       this.error = null
       try {
-        this.groupedItems = await collectionService.getGrouped(game)
+        this.groupedItems = await collectionService.getGrouped(options)
       } catch (err) {
         this.error = err.message
       } finally {
