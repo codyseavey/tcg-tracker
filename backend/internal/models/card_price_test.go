@@ -101,3 +101,45 @@ func TestCardGetPrice(t *testing.T) {
 		})
 	}
 }
+
+// TestCardGetPriceHoloOnlyCard tests the fallback behavior for holo-only cards
+// where JustTCG stores the price under "Normal" printing (since there's no non-holo version).
+// When the user marks the collection item as "Foil", we should still return the price.
+func TestCardGetPriceHoloOnlyCard(t *testing.T) {
+	// Simulates a holo-only card like Forretress from Neo Discovery
+	// JustTCG stores the price as "Normal" since there's no non-holo variant
+	holoOnlyCard := &Card{
+		ID:           "neo2-2",
+		PriceUSD:     18.84, // Base price (from Normal printing)
+		PriceFoilUSD: 0,     // No separate foil price (it's the only variant)
+		Prices: []CardPrice{
+			// JustTCG only returns "Normal" printing for holo-only cards
+			{Condition: PriceConditionNM, Printing: PrintingNormal, PriceUSD: 18.84},
+			{Condition: PriceConditionLP, Printing: PrintingNormal, PriceUSD: 15.00},
+		},
+	}
+
+	tests := []struct {
+		name      string
+		condition PriceCondition
+		printing  PrintingType
+		expected  float64
+	}{
+		// User marks card as "Foil" but JustTCG only has "Normal" prices
+		{"NM Foil uses Normal price", PriceConditionNM, PrintingFoil, 18.84},
+		{"LP Foil uses Normal price", PriceConditionLP, PrintingFoil, 15.00},
+		{"HP Foil uses NM Normal fallback", PriceConditionHP, PrintingFoil, 18.84},
+		// Normal printing should work as expected
+		{"NM Normal exact match", PriceConditionNM, PrintingNormal, 18.84},
+		{"LP Normal exact match", PriceConditionLP, PrintingNormal, 15.00},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := holoOnlyCard.GetPrice(tt.condition, tt.printing)
+			if result != tt.expected {
+				t.Errorf("GetPrice(%s, %s) = %f, want %f", tt.condition, tt.printing, result, tt.expected)
+			}
+		})
+	}
+}

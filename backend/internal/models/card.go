@@ -31,20 +31,86 @@ type Card struct {
 	Prices         []CardPrice `json:"prices,omitempty" gorm:"foreignKey:CardID;references:ID"`
 }
 
-// GetPrice returns the price for a specific condition and printing type
-// Falls back to the base PriceUSD/PriceFoilUSD if no condition-specific price exists
+// GetPrice returns the price for a specific condition and printing type.
+// Fallback order:
+//  1. Exact match (condition + printing) in CardPrices
+//  2. NM price for the same printing (if condition is not NM)
+//  3. For foil variants (1st Ed, Reverse Holo, etc.): try standard Foil price first
+//  4. Cross-printing fallback: Foil->Normal or Normal->Foil (for holo-only cards)
+//  5. Base prices (PriceFoilUSD for foil variants, PriceUSD otherwise)
+//  6. Final cross-fallback: if foil has no price, try non-foil and vice versa
 func (c *Card) GetPrice(condition PriceCondition, printing PrintingType) float64 {
-	// Look for condition-specific price
+	// 1. Look for exact condition+printing match
 	for _, p := range c.Prices {
 		if p.Condition == condition && p.Printing == printing {
 			return p.PriceUSD
 		}
 	}
-	// Fallback to base price
-	if printing.IsFoilVariant() {
-		return c.PriceFoilUSD
+
+	// 2. Try NM price for the same printing (if we're looking for non-NM)
+	if condition != PriceConditionNM {
+		for _, p := range c.Prices {
+			if p.Condition == PriceConditionNM && p.Printing == printing {
+				return p.PriceUSD
+			}
+		}
 	}
-	return c.PriceUSD
+
+	// 3. For foil variants (1st Ed, Reverse Holo), try standard Foil price
+	if printing.IsFoilVariant() && printing != PrintingFoil {
+		for _, p := range c.Prices {
+			if p.Condition == condition && p.Printing == PrintingFoil {
+				return p.PriceUSD
+			}
+		}
+		// Try NM Foil
+		if condition != PriceConditionNM {
+			for _, p := range c.Prices {
+				if p.Condition == PriceConditionNM && p.Printing == PrintingFoil {
+					return p.PriceUSD
+				}
+			}
+		}
+	}
+
+	// 4. Cross-printing fallback (for holo-only cards where JustTCG stores price as "Normal")
+	if printing.IsFoilVariant() {
+		// Foil variants: try Normal price (holo-only cards)
+		for _, p := range c.Prices {
+			if p.Condition == condition && p.Printing == PrintingNormal {
+				return p.PriceUSD
+			}
+		}
+		if condition != PriceConditionNM {
+			for _, p := range c.Prices {
+				if p.Condition == PriceConditionNM && p.Printing == PrintingNormal {
+					return p.PriceUSD
+				}
+			}
+		}
+	} else {
+		// Normal printing: try Foil as fallback
+		for _, p := range c.Prices {
+			if p.Condition == condition && p.Printing == PrintingFoil {
+				return p.PriceUSD
+			}
+		}
+	}
+
+	// 5. Fall back to base prices
+	if printing.IsFoilVariant() {
+		if c.PriceFoilUSD > 0 {
+			return c.PriceFoilUSD
+		}
+		// 6. Cross-fallback: foil variant with no foil price, use non-foil
+		return c.PriceUSD
+	}
+
+	if c.PriceUSD > 0 {
+		return c.PriceUSD
+	}
+	// 6. Cross-fallback: non-foil with no price, try foil
+	return c.PriceFoilUSD
 }
 
 type CardSearchResult struct {
