@@ -64,10 +64,9 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 ```
 
 Services will be available at:
-- Frontend: http://localhost:3000
-- Backend API: http://localhost:8080
+- App (Frontend + API): http://localhost:3080
 - Identifier: http://localhost:8099
-- Prometheus Metrics: http://localhost:8080/metrics
+- Prometheus Metrics: http://localhost:3080/metrics
 
 ### Docker Images
 
@@ -75,9 +74,10 @@ Images are automatically built and pushed to GitHub Container Registry on each c
 
 | Image | Description |
 |-------|-------------|
-| `ghcr.io/codyseavey/tcg-tracker/backend` | Go API server |
-| `ghcr.io/codyseavey/tcg-tracker/frontend` | Vue.js app (nginx) |
+| `ghcr.io/codyseavey/tcg-tracker/app` | Combined Go API + Vue.js frontend |
 | `ghcr.io/codyseavey/tcg-tracker/identifier` | Python OCR service |
+
+The `app` image is a multi-stage build that compiles the Vue.js frontend and Go backend into a single image, with the Go server serving the static frontend files.
 
 **Tags:**
 - `latest` - Most recent main branch build

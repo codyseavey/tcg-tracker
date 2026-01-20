@@ -3,15 +3,9 @@
 
 services:
   backend:
-    image: tcg-tracker/backend:local
+    image: tcg-tracker/app:local
     build:
-      context: ./backend
-      dockerfile: Dockerfile
-
-  frontend:
-    image: tcg-tracker/frontend:local
-    build:
-      context: ./frontend
+      context: .
       dockerfile: Dockerfile
 
   identifier:

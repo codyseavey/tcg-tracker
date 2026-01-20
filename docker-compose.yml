@@ -11,17 +11,17 @@
 #   - Pokemon data: ./data/pokemon-tcg-data/
 
 services:
-  # Go Backend API
+  # Go Backend API (serves frontend static files)
   backend:
-    image: ghcr.io/codyseavey/tcg-tracker/backend:${IMAGE_TAG:-latest}
+    image: ghcr.io/codyseavey/tcg-tracker/app:${IMAGE_TAG:-latest}
     container_name: tcg-backend
-    # Port 8080 exposed only within Docker network (frontend proxies to it)
-    expose:
-      - "8080"
+    ports:
+      - "3080:8080"
     environment:
       - PORT=8080
       - DB_PATH=/app/data/tcg_tracker.db
       - POKEMON_DATA_DIR=/app/data/pokemon-tcg-data
+      - FRONTEND_DIST_PATH=/app/frontend/dist
       - GIN_MODE=release
       - IDENTIFIER_SERVICE_URL=http://identifier:8099
       - JUSTTCG_API_KEY=${JUSTTCG_API_KEY:-}
@@ -30,16 +30,6 @@ services:
       - identifier
     volumes:
       - ./data:/app/data
-    restart: always
-
-  # Frontend (Nginx serving static build)
-  frontend:
-    image: ghcr.io/codyseavey/tcg-tracker/frontend:${IMAGE_TAG:-latest}
-    container_name: tcg-frontend
-    ports:
-      - "3080:80"
-    depends_on:
-      - backend
     restart: always
 
   # Identifier service (Python OCR) - optional, for server-side OCR
