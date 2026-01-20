@@ -323,10 +323,10 @@ func (w *PriceWorker) batchUpdatePrices(cards []models.Card) (int, error) {
 					}
 				}
 
-				// Fallback to name matching
+				// Fallback to name matching (with normalized name for special characters)
 				if tcgPlayerID == "" {
-					nameLower := strings.ToLower(card.Name)
-					if id, ok := setData.CardsByName[nameLower]; ok {
+					normalizedName := normalizeNameForPriceMatch(card.Name)
+					if id, ok := setData.CardsByName[normalizedName]; ok {
 						tcgPlayerID = id
 					}
 				}

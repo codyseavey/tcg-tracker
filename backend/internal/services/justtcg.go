@@ -683,8 +683,8 @@ func (s *JustTCGService) FetchSetTCGPlayerIDs(setID string) (*SetTCGPlayerIDMap,
 				result.CardsByNum[card.Number] = card.TCGPlayerID
 			}
 
-			// Store by name (fallback match)
-			baseName := strings.ToLower(extractBaseName(card.Name))
+			// Store by name (fallback match) - normalize for special characters
+			baseName := normalizeNameForPriceMatch(extractBaseName(card.Name))
 			result.CardsByName[baseName] = card.TCGPlayerID
 		}
 

@@ -11,6 +11,26 @@ import (
 	"github.com/codyseavey/tcg-tracker/backend/internal/models"
 )
 
+// normalizeNameForPriceMatch converts special characters to ASCII for JustTCG matching
+// JustTCG uses ASCII names while Pokemon TCG data uses Unicode
+func normalizeNameForPriceMatch(name string) string {
+	name = strings.ToLower(name)
+	// Pokemon-specific characters
+	name = strings.ReplaceAll(name, "♀", " f")     // Nidoran♀ -> nidoran f
+	name = strings.ReplaceAll(name, "♂", " m")     // Nidoran♂ -> nidoran m
+	name = strings.ReplaceAll(name, "é", "e")      // Pokémon -> pokemon
+	name = strings.ReplaceAll(name, "δ", " delta") // Deoxys δ -> deoxys delta
+	name = strings.ReplaceAll(name, "'", "")       // Farfetch'd -> farfetchd
+	name = strings.ReplaceAll(name, "'", "")       // Curly apostrophe
+	name = strings.ReplaceAll(name, ".", "")       // Mr. Mime -> mr mime
+	name = strings.ReplaceAll(name, "-", " ")      // Ho-Oh -> ho oh
+	// Normalize multiple spaces
+	for strings.Contains(name, "  ") {
+		name = strings.ReplaceAll(name, "  ", " ")
+	}
+	return strings.TrimSpace(name)
+}
+
 // TCGPlayerSyncService handles bulk syncing of TCGPlayerIDs from JustTCG
 type TCGPlayerSyncService struct {
 	justTCG *JustTCGService
@@ -156,10 +176,10 @@ func (s *TCGPlayerSyncService) SyncMissingTCGPlayerIDs(ctx context.Context) (*Sy
 				}
 			}
 
-			// Fallback to name matching
+			// Fallback to name matching (with normalized name for special characters)
 			if tcgPlayerID == "" {
-				nameLower := strings.ToLower(card.Name)
-				if id, ok := setData.CardsByName[nameLower]; ok {
+				normalizedName := normalizeNameForPriceMatch(card.Name)
+				if id, ok := setData.CardsByName[normalizedName]; ok {
 					tcgPlayerID = id
 				}
 			}
@@ -246,10 +266,10 @@ func (s *TCGPlayerSyncService) SyncSet(ctx context.Context, ourSetName string) (
 			}
 		}
 
-		// Fallback to name
+		// Fallback to name (with normalized name for special characters)
 		if tcgPlayerID == "" {
-			nameLower := strings.ToLower(card.Name)
-			if id, ok := setData.CardsByName[nameLower]; ok {
+			normalizedName := normalizeNameForPriceMatch(card.Name)
+			if id, ok := setData.CardsByName[normalizedName]; ok {
 				tcgPlayerID = id
 			}
 		}
@@ -283,58 +303,277 @@ func convertToJustTCGSetID(ourSetName string) string {
 
 	// Known mappings from our set codes/names to JustTCG set IDs
 	// JustTCG format: swsh0X-set-name-pokemon or sv0X-set-name-pokemon
-	// This map should be expanded as needed
 	knownMappings := map[string]string{
-		// Sword & Shield era (JustTCG uses swsh0X- prefix)
-		"swsh1":           "swsh01-sword-and-shield-pokemon",
-		"swsh2":           "swsh02-rebel-clash-pokemon",
-		"swsh3":           "swsh03-darkness-ablaze-pokemon",
-		"swsh4":           "swsh04-vivid-voltage-pokemon",
-		"swsh5":           "swsh05-battle-styles-pokemon",
-		"swsh6":           "swsh06-chilling-reign-pokemon",
-		"swsh7":           "swsh07-evolving-skies-pokemon",
-		"swsh8":           "swsh08-fusion-strike-pokemon",
-		"swsh9":           "swsh09-brilliant-stars-pokemon",
-		"swsh10":          "swsh10-astral-radiance-pokemon",
-		"swsh11":          "swsh11-lost-origin-pokemon",
-		"swsh12":          "swsh12-silver-tempest-pokemon",
-		"swsh12pt5":       "swsh12pt5-crown-zenith-pokemon",
-		"vivid-voltage":   "swsh04-vivid-voltage-pokemon",
-		"evolving-skies":  "swsh07-evolving-skies-pokemon",
-		"brilliant-stars": "swsh09-brilliant-stars-pokemon",
-		"lost-origin":     "swsh11-lost-origin-pokemon",
+		// Sword & Shield era - main sets (JustTCG uses swsh0X- prefix)
+		"swsh1":            "swsh01-sword-and-shield-pokemon",
+		"sword-and-shield": "swsh01-sword-and-shield-pokemon",
+		"swsh2":            "swsh02-rebel-clash-pokemon",
+		"rebel-clash":      "swsh02-rebel-clash-pokemon",
+		"swsh3":            "swsh03-darkness-ablaze-pokemon",
+		"darkness-ablaze":  "swsh03-darkness-ablaze-pokemon",
+		"swsh4":            "swsh04-vivid-voltage-pokemon",
+		"vivid-voltage":    "swsh04-vivid-voltage-pokemon",
+		"swsh5":            "swsh05-battle-styles-pokemon",
+		"battle-styles":    "swsh05-battle-styles-pokemon",
+		"swsh6":            "swsh06-chilling-reign-pokemon",
+		"chilling-reign":   "swsh06-chilling-reign-pokemon",
+		"swsh7":            "swsh07-evolving-skies-pokemon",
+		"evolving-skies":   "swsh07-evolving-skies-pokemon",
+		"swsh8":            "swsh08-fusion-strike-pokemon",
+		"fusion-strike":    "swsh08-fusion-strike-pokemon",
+		"swsh9":            "swsh09-brilliant-stars-pokemon",
+		"brilliant-stars":  "swsh09-brilliant-stars-pokemon",
+		"swsh10":           "swsh10-astral-radiance-pokemon",
+		"astral-radiance":  "swsh10-astral-radiance-pokemon",
+		"swsh11":           "swsh11-lost-origin-pokemon",
+		"lost-origin":      "swsh11-lost-origin-pokemon",
+		"swsh12":           "swsh12-silver-tempest-pokemon",
+		"silver-tempest":   "swsh12-silver-tempest-pokemon",
+		"swsh12pt5":        "swsh12pt5-crown-zenith-pokemon",
+		"crown-zenith":     "swsh12pt5-crown-zenith-pokemon",
 
-		// Scarlet & Violet era (JustTCG uses sv0X- prefix)
-		"sv1":                "sv01-scarlet-and-violet-pokemon",
-		"sv2":                "sv02-paldea-evolved-pokemon",
-		"sv3":                "sv03-obsidian-flames-pokemon",
-		"sv3pt5":             "sv03pt5-151-pokemon",
-		"sv4":                "sv04-paradox-rift-pokemon",
-		"sv4pt5":             "sv04pt5-paldean-fates-pokemon",
-		"sv5":                "sv05-temporal-forces-pokemon",
-		"sv6":                "sv06-twilight-masquerade-pokemon",
-		"sv6pt5":             "sv06pt5-shrouded-fable-pokemon",
-		"sv7":                "sv07-stellar-crown-pokemon",
-		"sv8":                "sv08-surging-sparks-pokemon",
-		"151":                "sv03pt5-151-pokemon",
-		"scarlet-and-violet": "sv01-scarlet-and-violet-pokemon",
-		"paldea-evolved":     "sv02-paldea-evolved-pokemon",
-		"obsidian-flames":    "sv03-obsidian-flames-pokemon",
+		// Sword & Shield special sets
+		"swsh35":         "swsh35-champions-path-pokemon",
+		"champions-path": "swsh35-champions-path-pokemon",
+		"swsh45":         "swsh45-shining-fates-pokemon",
+		"shining-fates":  "swsh45-shining-fates-pokemon",
+		"cel25":          "cel25-celebrations-pokemon",
+		"celebrations":   "cel25-celebrations-pokemon",
+		"pgo":            "pgo-pokemon-go-pokemon",
+		"pokemon-go":     "pgo-pokemon-go-pokemon",
+		"swsh45sv":       "swsh45sv-shiny-vault-pokemon",
+		"shiny-vault":    "swsh45sv-shiny-vault-pokemon",
 
-		// Classic sets
-		"base1":       "base-set-pokemon",
-		"base":        "base-set-pokemon",
-		"base-set":    "base-set-pokemon",
-		"jungle":      "jungle-pokemon",
-		"fossil":      "fossil-pokemon",
-		"base2":       "base-set-2-pokemon",
-		"team-rocket": "team-rocket-pokemon",
-		"gym1":        "gym-heroes-pokemon",
-		"gym2":        "gym-challenge-pokemon",
-		"neo1":        "neo-genesis-pokemon",
-		"neo2":        "neo-discovery-pokemon",
-		"neo3":        "neo-revelation-pokemon",
-		"neo4":        "neo-destiny-pokemon",
+		// Scarlet & Violet era - main sets (JustTCG uses sv0X- prefix)
+		"sv1":                  "sv01-scarlet-and-violet-pokemon",
+		"scarlet-and-violet":   "sv01-scarlet-and-violet-pokemon",
+		"sv2":                  "sv02-paldea-evolved-pokemon",
+		"paldea-evolved":       "sv02-paldea-evolved-pokemon",
+		"sv3":                  "sv03-obsidian-flames-pokemon",
+		"obsidian-flames":      "sv03-obsidian-flames-pokemon",
+		"sv3pt5":               "sv03pt5-151-pokemon",
+		"151":                  "sv03pt5-151-pokemon",
+		"pokemon-151":          "sv03pt5-151-pokemon",
+		"sv4":                  "sv04-paradox-rift-pokemon",
+		"paradox-rift":         "sv04-paradox-rift-pokemon",
+		"sv4pt5":               "sv04pt5-paldean-fates-pokemon",
+		"paldean-fates":        "sv04pt5-paldean-fates-pokemon",
+		"sv5":                  "sv05-temporal-forces-pokemon",
+		"temporal-forces":      "sv05-temporal-forces-pokemon",
+		"sv6":                  "sv06-twilight-masquerade-pokemon",
+		"twilight-masquerade":  "sv06-twilight-masquerade-pokemon",
+		"sv6pt5":               "sv06pt5-shrouded-fable-pokemon",
+		"shrouded-fable":       "sv06pt5-shrouded-fable-pokemon",
+		"sv7":                  "sv07-stellar-crown-pokemon",
+		"stellar-crown":        "sv07-stellar-crown-pokemon",
+		"sv8":                  "sv08-surging-sparks-pokemon",
+		"surging-sparks":       "sv08-surging-sparks-pokemon",
+		"sv8pt5":               "sv08pt5-prismatic-evolutions-pokemon",
+		"prismatic-evolutions": "sv08pt5-prismatic-evolutions-pokemon",
+
+		// Scarlet & Violet special sets
+		"svp":                       "svp-scarlet-and-violet-promos-pokemon",
+		"scarlet-and-violet-promos": "svp-scarlet-and-violet-promos-pokemon",
+
+		// Classic sets (WotC era)
+		"base1":                "base-set-pokemon",
+		"base":                 "base-set-pokemon",
+		"base-set":             "base-set-pokemon",
+		"jungle":               "jungle-pokemon",
+		"fossil":               "fossil-pokemon",
+		"base2":                "base-set-2-pokemon",
+		"base4":                "base-set-2-pokemon", // Pokemon TCG API code
+		"base-set-2":           "base-set-2-pokemon",
+		"team-rocket":          "team-rocket-pokemon",
+		"gym1":                 "gym-heroes-pokemon",
+		"gym-heroes":           "gym-heroes-pokemon",
+		"gym2":                 "gym-challenge-pokemon",
+		"gym-challenge":        "gym-challenge-pokemon",
+		"neo1":                 "neo-genesis-pokemon",
+		"neo-genesis":          "neo-genesis-pokemon",
+		"neo2":                 "neo-discovery-pokemon",
+		"neo-discovery":        "neo-discovery-pokemon",
+		"neo3":                 "neo-revelation-pokemon",
+		"neo-revelation":       "neo-revelation-pokemon",
+		"neo4":                 "neo-destiny-pokemon",
+		"neo-destiny":          "neo-destiny-pokemon",
+		"base6":                "legendary-collection-pokemon",
+		"legendary-collection": "legendary-collection-pokemon",
+
+		// e-Card era
+		"ecard1":              "expedition-base-set-pokemon",
+		"expedition-base-set": "expedition-base-set-pokemon",
+		"ecard2":              "aquapolis-pokemon",
+		"aquapolis":           "aquapolis-pokemon",
+		"ecard3":              "skyridge-pokemon",
+		"skyridge":            "skyridge-pokemon",
+
+		// EX era
+		"ex1":                     "ruby-and-sapphire-pokemon",
+		"ruby-and-sapphire":       "ruby-and-sapphire-pokemon",
+		"ex2":                     "sandstorm-pokemon",
+		"sandstorm":               "sandstorm-pokemon",
+		"ex3":                     "dragon-pokemon",
+		"dragon":                  "dragon-pokemon",
+		"ex4":                     "team-magma-vs-team-aqua-pokemon",
+		"team-magma-vs-team-aqua": "team-magma-vs-team-aqua-pokemon",
+		"ex5":                     "hidden-legends-pokemon",
+		"hidden-legends":          "hidden-legends-pokemon",
+		"ex6":                     "firered-and-leafgreen-pokemon",
+		"firered-and-leafgreen":   "firered-and-leafgreen-pokemon",
+		"ex7":                     "team-rocket-returns-pokemon",
+		"team-rocket-returns":     "team-rocket-returns-pokemon",
+		"ex8":                     "deoxys-pokemon",
+		"deoxys":                  "deoxys-pokemon",
+		"ex9":                     "emerald-pokemon",
+		"emerald":                 "emerald-pokemon",
+		"ex10":                    "unseen-forces-pokemon",
+		"unseen-forces":           "unseen-forces-pokemon",
+		"ex11":                    "delta-species-pokemon",
+		"delta-species":           "delta-species-pokemon",
+		"ex12":                    "legend-maker-pokemon",
+		"legend-maker":            "legend-maker-pokemon",
+		"ex13":                    "holon-phantoms-pokemon",
+		"holon-phantoms":          "holon-phantoms-pokemon",
+		"ex14":                    "crystal-guardians-pokemon",
+		"crystal-guardians":       "crystal-guardians-pokemon",
+		"ex15":                    "dragon-frontiers-pokemon",
+		"dragon-frontiers":        "dragon-frontiers-pokemon",
+		"ex16":                    "power-keepers-pokemon",
+		"power-keepers":           "power-keepers-pokemon",
+
+		// Diamond & Pearl era
+		"dp1":                  "diamond-and-pearl-pokemon",
+		"diamond-and-pearl":    "diamond-and-pearl-pokemon",
+		"dp2":                  "mysterious-treasures-pokemon",
+		"mysterious-treasures": "mysterious-treasures-pokemon",
+		"dp3":                  "secret-wonders-pokemon",
+		"secret-wonders":       "secret-wonders-pokemon",
+		"dp4":                  "great-encounters-pokemon",
+		"great-encounters":     "great-encounters-pokemon",
+		"dp5":                  "majestic-dawn-pokemon",
+		"majestic-dawn":        "majestic-dawn-pokemon",
+		"dp6":                  "legends-awakened-pokemon",
+		"legends-awakened":     "legends-awakened-pokemon",
+		"dp7":                  "stormfront-pokemon",
+		"stormfront":           "stormfront-pokemon",
+
+		// Platinum era
+		"pl1":             "platinum-pokemon",
+		"platinum":        "platinum-pokemon",
+		"pl2":             "rising-rivals-pokemon",
+		"rising-rivals":   "rising-rivals-pokemon",
+		"pl3":             "supreme-victors-pokemon",
+		"supreme-victors": "supreme-victors-pokemon",
+		"pl4":             "arceus-pokemon",
+		"arceus":          "arceus-pokemon",
+
+		// HeartGold SoulSilver era
+		"hgss1":                "heartgold-and-soulsilver-pokemon",
+		"heartgold-soulsilver": "heartgold-and-soulsilver-pokemon",
+		"hgss2":                "unleashed-pokemon",
+		"unleashed":            "unleashed-pokemon",
+		"hgss3":                "undaunted-pokemon",
+		"undaunted":            "undaunted-pokemon",
+		"hgss4":                "triumphant-pokemon",
+		"triumphant":           "triumphant-pokemon",
+
+		// Black & White era
+		"bw1":                 "black-and-white-pokemon",
+		"black-and-white":     "black-and-white-pokemon",
+		"bw2":                 "emerging-powers-pokemon",
+		"emerging-powers":     "emerging-powers-pokemon",
+		"bw3":                 "noble-victories-pokemon",
+		"noble-victories":     "noble-victories-pokemon",
+		"bw4":                 "next-destinies-pokemon",
+		"next-destinies":      "next-destinies-pokemon",
+		"bw5":                 "dark-explorers-pokemon",
+		"dark-explorers":      "dark-explorers-pokemon",
+		"bw6":                 "dragons-exalted-pokemon",
+		"dragons-exalted":     "dragons-exalted-pokemon",
+		"bw7":                 "boundaries-crossed-pokemon",
+		"boundaries-crossed":  "boundaries-crossed-pokemon",
+		"bw8":                 "plasma-storm-pokemon",
+		"plasma-storm":        "plasma-storm-pokemon",
+		"bw9":                 "plasma-freeze-pokemon",
+		"plasma-freeze":       "plasma-freeze-pokemon",
+		"bw10":                "plasma-blast-pokemon",
+		"plasma-blast":        "plasma-blast-pokemon",
+		"bw11":                "legendary-treasures-pokemon",
+		"legendary-treasures": "legendary-treasures-pokemon",
+
+		// XY era
+		"xy1":             "xy-pokemon",
+		"xy":              "xy-pokemon",
+		"xy2":             "flashfire-pokemon",
+		"flashfire":       "flashfire-pokemon",
+		"xy3":             "furious-fists-pokemon",
+		"furious-fists":   "furious-fists-pokemon",
+		"xy4":             "phantom-forces-pokemon",
+		"phantom-forces":  "phantom-forces-pokemon",
+		"xy5":             "primal-clash-pokemon",
+		"primal-clash":    "primal-clash-pokemon",
+		"xy6":             "roaring-skies-pokemon",
+		"roaring-skies":   "roaring-skies-pokemon",
+		"xy7":             "ancient-origins-pokemon",
+		"ancient-origins": "ancient-origins-pokemon",
+		"xy8":             "breakthrough-pokemon",
+		"breakthrough":    "breakthrough-pokemon",
+		"xy9":             "breakpoint-pokemon",
+		"breakpoint":      "breakpoint-pokemon",
+		"xy10":            "fates-collide-pokemon",
+		"fates-collide":   "fates-collide-pokemon",
+		"xy11":            "steam-siege-pokemon",
+		"steam-siege":     "steam-siege-pokemon",
+		"xy12":            "evolutions-pokemon",
+		"evolutions":      "evolutions-pokemon",
+
+		// Sun & Moon era
+		"sm1":              "sun-and-moon-pokemon",
+		"sun-and-moon":     "sun-and-moon-pokemon",
+		"sm2":              "guardians-rising-pokemon",
+		"guardians-rising": "guardians-rising-pokemon",
+		"sm3":              "burning-shadows-pokemon",
+		"burning-shadows":  "burning-shadows-pokemon",
+		"sm4":              "crimson-invasion-pokemon",
+		"crimson-invasion": "crimson-invasion-pokemon",
+		"sm5":              "ultra-prism-pokemon",
+		"ultra-prism":      "ultra-prism-pokemon",
+		"sm6":              "forbidden-light-pokemon",
+		"forbidden-light":  "forbidden-light-pokemon",
+		"sm7":              "celestial-storm-pokemon",
+		"celestial-storm":  "celestial-storm-pokemon",
+		"sm8":              "lost-thunder-pokemon",
+		"lost-thunder":     "lost-thunder-pokemon",
+		"sm9":              "team-up-pokemon",
+		"team-up":          "team-up-pokemon",
+		"sm10":             "unbroken-bonds-pokemon",
+		"unbroken-bonds":   "unbroken-bonds-pokemon",
+		"sm11":             "unified-minds-pokemon",
+		"unified-minds":    "unified-minds-pokemon",
+		"sm12":             "cosmic-eclipse-pokemon",
+		"cosmic-eclipse":   "cosmic-eclipse-pokemon",
+
+		// Promos
+		"basep":                      "wizards-black-star-promos-pokemon",
+		"wizards-black-star-promos":  "wizards-black-star-promos-pokemon",
+		"np":                         "nintendo-black-star-promos-pokemon",
+		"nintendo-black-star-promos": "nintendo-black-star-promos-pokemon",
+		"pop1":                       "pop-series-1-pokemon",
+		"pop2":                       "pop-series-2-pokemon",
+		"pop3":                       "pop-series-3-pokemon",
+		"pop4":                       "pop-series-4-pokemon",
+		"pop5":                       "pop-series-5-pokemon",
+		"pop6":                       "pop-series-6-pokemon",
+		"pop7":                       "pop-series-7-pokemon",
+		"pop8":                       "pop-series-8-pokemon",
+		"pop9":                       "pop-series-9-pokemon",
+
+		// Trainer Kits (these may not have price data)
+		"tk1a":                  "ex-trainer-kit-latias-pokemon",
+		"ex-trainer-kit-latias": "ex-trainer-kit-latias-pokemon",
+		"tk1b":                  "ex-trainer-kit-latios-pokemon",
+		"ex-trainer-kit-latios": "ex-trainer-kit-latios-pokemon",
 	}
 
 	// Check direct mapping first
