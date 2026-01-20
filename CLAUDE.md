@@ -205,14 +205,14 @@ Optional admin key authentication protects collection modification endpoints:
 - `Card.GetPrice()` fallback chain (handles holo-only cards and WotC-era cards):
   1. Exact condition+printing match from `card_prices`
   2. NM price for same printing (if condition is not NM)
-  3. For foil variants (Reverse Holo): try standard Foil price first
-  4. Cross-printing fallback:
-     - Foil/ReverseHolo -> Normal (for holo-only cards where JustTCG stores price as "Normal")
+  3. Printing-specific fallback:
+     - Foil -> Normal (for holo-only cards where JustTCG stores price as "Normal")
+     - Reverse Holo -> Normal (parallel version of Normal card, NOT related to Holo Rare)
      - Normal -> Unlimited (for WotC-era cards)
      - Unlimited -> Normal (for modern cards)
      - 1st Edition -> Unlimited -> Normal (WotC-era, different print run, NOT a foil)
-  5. Base prices (`PriceFoilUSD` for foil variants, `PriceUSD` otherwise)
-  6. Final cross-fallback if primary base price is zero
+  4. Base prices (`PriceFoilUSD` for foil variants, `PriceUSD` otherwise)
+  5. Final cross-fallback if primary base price is zero
 - Viewing card prices (`GET /cards/:id/prices`) auto-queues refresh if stale
 
 ### Price Worker

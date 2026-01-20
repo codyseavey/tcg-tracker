@@ -36,14 +36,14 @@ type Card struct {
 // Fallback order:
 //  1. Exact match (condition + printing) in CardPrices
 //  2. NM price for the same printing (if condition is not NM)
-//  3. For foil variants (Reverse Holo): try standard Foil price first
-//  4. Cross-printing fallback:
-//     - Foil/ReverseHolo -> Normal (for holo-only cards)
+//  3. Printing-specific fallback:
+//     - Foil -> Normal (for holo-only cards where JustTCG stores price as "Normal")
+//     - Reverse Holo -> Normal (parallel version of Normal card, NOT related to Foil/Holo Rare)
 //     - Normal -> Unlimited (for WotC-era cards)
 //     - Unlimited -> Normal (for modern cards)
 //     - 1st Edition -> Unlimited -> Normal (WotC-era, different print run not foil)
-//  5. Base prices (PriceFoilUSD for foil variants, PriceUSD otherwise)
-//  6. Final cross-fallback: if foil has no price, try non-foil and vice versa
+//  4. Base prices (PriceFoilUSD for foil variants, PriceUSD otherwise)
+//  5. Final cross-fallback: if foil has no price, try non-foil and vice versa
 func (c *Card) GetPrice(condition PriceCondition, printing PrintingType) float64 {
 	// 1. Look for exact condition+printing match
 	for _, p := range c.Prices {
@@ -61,26 +61,25 @@ func (c *Card) GetPrice(condition PriceCondition, printing PrintingType) float64
 		}
 	}
 
-	// 3. For foil variants (1st Ed, Reverse Holo), try standard Foil price
-	if printing.IsFoilVariant() && printing != PrintingFoil {
+	// 3. Printing-specific fallback
+	if printing == PrintingFoil {
+		// Foil: try Normal (for holo-only cards where JustTCG stores price as "Normal")
 		for _, p := range c.Prices {
-			if p.Condition == condition && p.Printing == PrintingFoil {
+			if p.Condition == condition && p.Printing == PrintingNormal {
 				return p.PriceUSD
 			}
 		}
-		// Try NM Foil
 		if condition != PriceConditionNM {
 			for _, p := range c.Prices {
-				if p.Condition == PriceConditionNM && p.Printing == PrintingFoil {
+				if p.Condition == PriceConditionNM && p.Printing == PrintingNormal {
 					return p.PriceUSD
 				}
 			}
 		}
-	}
-
-	// 4. Cross-printing fallback (for holo-only cards where JustTCG stores price as "Normal")
-	if printing.IsFoilVariant() {
-		// Foil variants: try Normal price (holo-only cards)
+	} else if printing == PrintingReverseHolo {
+		// Reverse Holo: fall back to Normal directly
+		// Reverse Holo is a parallel foil pattern of the Normal card, NOT related to Holo Rare/Foil
+		// A Reverse Holo common ($2) should NOT fall back to Holo Rare ($177)
 		for _, p := range c.Prices {
 			if p.Condition == condition && p.Printing == PrintingNormal {
 				return p.PriceUSD

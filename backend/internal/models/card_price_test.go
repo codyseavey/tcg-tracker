@@ -86,10 +86,10 @@ func TestCardGetPrice(t *testing.T) {
 		{"LP normal", PriceConditionLP, PrintingNormal, 8.00},
 		{"LP foil", PriceConditionLP, PrintingFoil, 16.00},
 		{"MP normal", PriceConditionMP, PrintingNormal, 6.00},
-		{"HP normal fallback to base", PriceConditionHP, PrintingNormal, 10.00},            // Falls back to base price
-		{"DMG foil fallback to base", PriceConditionDMG, PrintingFoil, 20.00},              // Falls back to foil base price
-		{"NM 1st Edition fallback to Normal", PriceConditionNM, Printing1stEdition, 10.00}, // No 1st ed price, falls back to Normal (not foil!)
-		{"NM Reverse Holo fallback to foil", PriceConditionNM, PrintingReverseHolo, 20.00}, // No reverse price, IsFoilVariant=true
+		{"HP normal fallback to base", PriceConditionHP, PrintingNormal, 10.00},              // Falls back to base price
+		{"DMG foil fallback to base", PriceConditionDMG, PrintingFoil, 20.00},                // Falls back to foil base price
+		{"NM 1st Edition fallback to Normal", PriceConditionNM, Printing1stEdition, 10.00},   // No 1st ed price, falls back to Normal (not foil!)
+		{"NM Reverse Holo fallback to Normal", PriceConditionNM, PrintingReverseHolo, 10.00}, // Reverse Holo falls back to Normal, NOT Foil
 	}
 
 	for _, tt := range tests {
@@ -178,6 +178,50 @@ func TestCardGetPrice1stEditionFallback(t *testing.T) {
 		{"HP 1st Edition should use NM Normal, not Foil", PriceConditionHP, Printing1stEdition, 0.68},
 		// Foil should still use Foil price
 		{"NM Foil uses Foil price", PriceConditionNM, PrintingFoil, 160.25},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := card.GetPrice(tt.condition, tt.printing)
+			if result != tt.expected {
+				t.Errorf("GetPrice(%s, %s) = %f, want %f", tt.condition, tt.printing, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestCardGetPriceReverseHoloFallback tests the specific bug where Reverse Holo
+// was incorrectly falling back to Foil prices instead of Normal prices.
+// This caused cards like EX Dragon Shelgon Reverse Holo to show $177 instead of $1.46.
+// Reverse Holo is a parallel foil pattern of the Normal card, NOT related to Holo Rare/Foil.
+func TestCardGetPriceReverseHoloFallback(t *testing.T) {
+	// Simulates EX Dragon Shelgon: JustTCG has Normal ($1.46) and Foil/Holo ($177)
+	// The user has a Reverse Holo version, which should fall back to Normal
+	card := &Card{
+		ID:           "ex3-20",
+		PriceUSD:     1.46,   // Base NM Normal price
+		PriceFoilUSD: 177.00, // Holo Rare price (completely different variant)
+		Prices: []CardPrice{
+			{Condition: PriceConditionNM, Printing: PrintingNormal, PriceUSD: 1.46},
+			{Condition: PriceConditionLP, Printing: PrintingNormal, PriceUSD: 1.00},
+			{Condition: PriceConditionNM, Printing: PrintingFoil, PriceUSD: 177.00},
+		},
+	}
+
+	tests := []struct {
+		name      string
+		condition PriceCondition
+		printing  PrintingType
+		expected  float64
+	}{
+		// Reverse Holo should NOT use the Foil/Holo Rare price!
+		{"NM Reverse Holo should use Normal, not Foil", PriceConditionNM, PrintingReverseHolo, 1.46},
+		{"LP Reverse Holo should use Normal, not Foil", PriceConditionLP, PrintingReverseHolo, 1.00},
+		{"HP Reverse Holo should use NM Normal, not Foil", PriceConditionHP, PrintingReverseHolo, 1.46},
+		// Foil should still use Foil price
+		{"NM Foil uses Foil price", PriceConditionNM, PrintingFoil, 177.00},
+		// Normal should use Normal price
+		{"NM Normal uses Normal price", PriceConditionNM, PrintingNormal, 1.46},
 	}
 
 	for _, tt := range tests {
