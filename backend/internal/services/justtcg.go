@@ -55,6 +55,7 @@ type JustTCGCard struct {
 	SetName     string           `json:"set_name"`
 	Number      string           `json:"number"`
 	TCGPlayerID string           `json:"tcgplayerId"`
+	ScryfallID  string           `json:"scryfallId"`
 	Rarity      string           `json:"rarity"`
 	Variants    []JustTCGVariant `json:"variants"`
 }
@@ -431,25 +432,42 @@ func (s *JustTCGService) fetchCardsBatchPost(lookups []CardLookup) (*BatchPriceR
 		DiscoveredTCGPIDs: make(map[string]string),
 	}
 
-	// Match responses to lookups by index (JustTCG returns cards in same order as request)
-	// We also collect any TCGPlayerIDs we discover
-	for i, card := range apiResp.Data {
-		if i >= len(lookups) {
-			break // More results than lookups (shouldn't happen)
+	// Build lookup maps to match responses by ID (NOT by index!)
+	// JustTCG may skip cards it can't find, so index-based matching is WRONG
+	tcgPlayerIDToCardID := make(map[string]string)
+	scryfallIDToCardID := make(map[string]string)
+	for _, lookup := range lookups {
+		if lookup.TCGPlayerID != "" {
+			tcgPlayerIDToCardID[lookup.TCGPlayerID] = lookup.CardID
 		}
+		if lookup.ScryfallID != "" {
+			scryfallIDToCardID[lookup.ScryfallID] = lookup.CardID
+		}
+	}
 
+	// Match responses by TCGPlayerID or ScryfallID
+	for _, card := range apiResp.Data {
 		prices := s.convertVariantsToPrices(card.Variants)
 		if len(prices) == 0 {
 			continue
 		}
 
-		lookup := lookups[i]
-		result.Prices[lookup.CardID] = prices
-
-		// Discover TCGPlayerID if we don't have it
-		if lookup.TCGPlayerID == "" && card.TCGPlayerID != "" {
-			result.DiscoveredTCGPIDs[lookup.CardID] = card.TCGPlayerID
+		// Find our card ID by matching the response's TCGPlayerID or ScryfallID
+		var cardID string
+		if card.TCGPlayerID != "" {
+			cardID = tcgPlayerIDToCardID[card.TCGPlayerID]
 		}
+		if cardID == "" && card.ScryfallID != "" {
+			cardID = scryfallIDToCardID[card.ScryfallID]
+		}
+
+		if cardID == "" {
+			log.Printf("JustTCG: received prices for unknown card (tcgplayerId=%s, scryfallId=%s, name=%s)",
+				card.TCGPlayerID, card.ScryfallID, card.Name)
+			continue
+		}
+
+		result.Prices[cardID] = prices
 	}
 
 	s.updateRemaining(apiResp.Metadata.APIDailyRequestsRemaining)
