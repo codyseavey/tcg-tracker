@@ -24,6 +24,8 @@ func normalizeNameForPriceMatch(name string) string {
 	name = strings.ReplaceAll(name, "'", "")       // Curly apostrophe
 	name = strings.ReplaceAll(name, ".", "")       // Mr. Mime -> mr mime
 	name = strings.ReplaceAll(name, "-", " ")      // Ho-Oh -> ho oh
+	// Spelling variations between Pokemon TCG data and JustTCG
+	name = strings.ReplaceAll(name, "impostor", "imposter") // Impostor -> Imposter (JustTCG spelling)
 	// Normalize multiple spaces
 	for strings.Contains(name, "  ") {
 		name = strings.ReplaceAll(name, "  ", " ")
@@ -156,7 +158,11 @@ func (s *TCGPlayerSyncService) SyncMissingTCGPlayerIDs(ctx context.Context) (*Sy
 		result.SetsProcessed++
 		result.RequestsUsed++ // Approximate - pagination may use more
 
+		log.Printf("TCGPlayerSync: set %s returned %d cards from JustTCG (by num: %d, by name: %d)",
+			justTCGSetID, setData.TotalCards, len(setData.CardsByNum), len(setData.CardsByName))
+
 		// Match and update cards
+		setUpdated := 0
 		for i := range cards {
 			card := &cards[i]
 			tcgPlayerID := ""
@@ -191,8 +197,13 @@ func (s *TCGPlayerSyncService) SyncMissingTCGPlayerIDs(ctx context.Context) (*Sy
 					result.Errors = append(result.Errors, err.Error())
 				} else {
 					result.CardsUpdated++
+					setUpdated++
 				}
 			} else {
+				// Log failed matches for debugging
+				normalizedName := normalizeNameForPriceMatch(card.Name)
+				log.Printf("TCGPlayerSync: no match for %q #%s in set %s (normalized name: %q)",
+					card.Name, card.CardNumber, justTCGSetID, normalizedName)
 				result.CardsSkipped++
 			}
 		}
@@ -401,8 +412,9 @@ func convertToJustTCGSetID(ourSetName string) string {
 		"legendary-collection": "legendary-collection-pokemon",
 
 		// e-Card era
-		"ecard1":              "expedition-base-set-pokemon",
-		"expedition-base-set": "expedition-base-set-pokemon",
+		"ecard1":              "expedition-pokemon",
+		"expedition-base-set": "expedition-pokemon",
+		"expedition":          "expedition-pokemon",
 		"ecard2":              "aquapolis-pokemon",
 		"aquapolis":           "aquapolis-pokemon",
 		"ecard3":              "skyridge-pokemon",
@@ -419,8 +431,9 @@ func convertToJustTCGSetID(ourSetName string) string {
 		"team-magma-vs-team-aqua": "team-magma-vs-team-aqua-pokemon",
 		"ex5":                     "hidden-legends-pokemon",
 		"hidden-legends":          "hidden-legends-pokemon",
-		"ex6":                     "firered-and-leafgreen-pokemon",
-		"firered-and-leafgreen":   "firered-and-leafgreen-pokemon",
+		"ex6":                     "firered-leafgreen-pokemon",
+		"firered-and-leafgreen":   "firered-leafgreen-pokemon",
+		"firered-leafgreen":       "firered-leafgreen-pokemon",
 		"ex7":                     "team-rocket-returns-pokemon",
 		"team-rocket-returns":     "team-rocket-returns-pokemon",
 		"ex8":                     "deoxys-pokemon",
@@ -555,8 +568,8 @@ func convertToJustTCGSetID(ourSetName string) string {
 		"cosmic-eclipse":   "cosmic-eclipse-pokemon",
 
 		// Promos
-		"basep":                      "wizards-black-star-promos-pokemon",
-		"wizards-black-star-promos":  "wizards-black-star-promos-pokemon",
+		"basep":                      "wotc-promo-pokemon",
+		"wizards-black-star-promos":  "wotc-promo-pokemon",
 		"np":                         "nintendo-black-star-promos-pokemon",
 		"nintendo-black-star-promos": "nintendo-black-star-promos-pokemon",
 		"pop1":                       "pop-series-1-pokemon",

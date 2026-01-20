@@ -679,8 +679,25 @@ func (s *JustTCGService) FetchSetTCGPlayerIDs(setID string) (*SetTCGPlayerIDMap,
 			}
 
 			// Store by card number (primary match)
+			// Handle formats like "073/102", "73", "73/102"
 			if card.Number != "" && card.Number != "N/A" {
 				result.CardsByNum[card.Number] = card.TCGPlayerID
+
+				// Extract number without /total suffix
+				numOnly := card.Number
+				if idx := strings.Index(card.Number, "/"); idx > 0 {
+					numOnly = card.Number[:idx]
+					result.CardsByNum[numOnly] = card.TCGPlayerID
+				}
+
+				// Also store without leading zeros (e.g., "073" -> "73")
+				numStripped := strings.TrimLeft(numOnly, "0")
+				if numStripped == "" {
+					numStripped = "0"
+				}
+				if numStripped != numOnly {
+					result.CardsByNum[numStripped] = card.TCGPlayerID
+				}
 			}
 
 			// Store by name (fallback match) - normalize for special characters

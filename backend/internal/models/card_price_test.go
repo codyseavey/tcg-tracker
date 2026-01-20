@@ -102,6 +102,52 @@ func TestCardGetPrice(t *testing.T) {
 	}
 }
 
+// TestCardGetPriceWotCCard tests the fallback behavior for WotC-era cards
+// where JustTCG stores prices as "Unlimited" and "1st Edition" instead of "Normal".
+// When the user adds a card with default printing "Normal", we should use Unlimited prices.
+func TestCardGetPriceWotCCard(t *testing.T) {
+	// Simulates a WotC-era card like Grimer from Team Rocket
+	// JustTCG returns "Unlimited" (~$1) and "1st Edition" (~$100) prices
+	wotcCard := &Card{
+		ID:           "base5-57",
+		PriceUSD:     0.89,   // Base price from Unlimited
+		PriceFoilUSD: 100.00, // From 1st Edition (a foil variant)
+		Prices: []CardPrice{
+			{Condition: PriceConditionNM, Printing: PrintingUnlimited, PriceUSD: 0.89},
+			{Condition: PriceConditionLP, Printing: PrintingUnlimited, PriceUSD: 0.50},
+			{Condition: PriceConditionNM, Printing: Printing1stEdition, PriceUSD: 100.00},
+			{Condition: PriceConditionLP, Printing: Printing1stEdition, PriceUSD: 80.00},
+		},
+	}
+
+	tests := []struct {
+		name      string
+		condition PriceCondition
+		printing  PrintingType
+		expected  float64
+	}{
+		// Normal printing should fall back to Unlimited (the common WotC variant)
+		{"NM Normal falls back to Unlimited", PriceConditionNM, PrintingNormal, 0.89},
+		{"LP Normal falls back to Unlimited", PriceConditionLP, PrintingNormal, 0.50},
+		{"HP Normal falls back to NM Unlimited", PriceConditionHP, PrintingNormal, 0.89},
+		// Unlimited printing should work directly
+		{"NM Unlimited exact match", PriceConditionNM, PrintingUnlimited, 0.89},
+		{"LP Unlimited exact match", PriceConditionLP, PrintingUnlimited, 0.50},
+		// 1st Edition should return the expensive price
+		{"NM 1st Edition exact match", PriceConditionNM, Printing1stEdition, 100.00},
+		{"LP 1st Edition exact match", PriceConditionLP, Printing1stEdition, 80.00},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := wotcCard.GetPrice(tt.condition, tt.printing)
+			if result != tt.expected {
+				t.Errorf("GetPrice(%s, %s) = %f, want %f", tt.condition, tt.printing, result, tt.expected)
+			}
+		})
+	}
+}
+
 // TestCardGetPriceHoloOnlyCard tests the fallback behavior for holo-only cards
 // where JustTCG stores the price under "Normal" printing (since there's no non-holo version).
 // When the user marks the collection item as "Foil", we should still return the price.

@@ -89,11 +89,32 @@ func (c *Card) GetPrice(condition PriceCondition, printing PrintingType) float64
 				}
 			}
 		}
-	} else {
-		// Normal printing: try Foil as fallback
+	} else if printing == PrintingNormal {
+		// Normal printing: try Unlimited as fallback (for WotC-era cards)
 		for _, p := range c.Prices {
-			if p.Condition == condition && p.Printing == PrintingFoil {
+			if p.Condition == condition && p.Printing == PrintingUnlimited {
 				return p.PriceUSD
+			}
+		}
+		if condition != PriceConditionNM {
+			for _, p := range c.Prices {
+				if p.Condition == PriceConditionNM && p.Printing == PrintingUnlimited {
+					return p.PriceUSD
+				}
+			}
+		}
+	} else if printing == PrintingUnlimited {
+		// Unlimited printing: try Normal as fallback (modern cards use Normal)
+		for _, p := range c.Prices {
+			if p.Condition == condition && p.Printing == PrintingNormal {
+				return p.PriceUSD
+			}
+		}
+		if condition != PriceConditionNM {
+			for _, p := range c.Prices {
+				if p.Condition == PriceConditionNM && p.Printing == PrintingNormal {
+					return p.PriceUSD
+				}
 			}
 		}
 	}
