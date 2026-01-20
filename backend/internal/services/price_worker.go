@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,8 +15,18 @@ import (
 // Constants for price worker configuration
 const (
 	// defaultBatchSize is the number of cards to update per batch
-	defaultBatchSize = 20
+	// Paid tier allows 100 cards per request
+	defaultBatchSize = 100
 )
+
+// UnmatchedCard represents a card that couldn't be matched for price updates
+type UnmatchedCard struct {
+	CardID     string `json:"card_id"`
+	Name       string `json:"name"`
+	CardNumber string `json:"card_number"`
+	SetName    string `json:"set_name"`
+	Reason     string `json:"reason"`
+}
 
 type PriceWorker struct {
 	priceService   *PriceService
@@ -35,6 +46,9 @@ type PriceWorker struct {
 	cardsUpdatedToday int
 	lastUpdateTime    time.Time
 	lastStatsDay      time.Time // Track which day the stats are for
+
+	// Cards that couldn't be matched for price updates
+	unmatchedCards []UnmatchedCard
 }
 
 type PriceStatus struct {
@@ -48,6 +62,9 @@ type PriceStatus struct {
 	DailyLimit int       `json:"daily_limit"`
 	Remaining  int       `json:"remaining"`
 	ResetsAt   time.Time `json:"resets_at,omitempty"`
+
+	// Cards that can't receive price updates (missing TCGPlayerID)
+	UnmatchedCards []UnmatchedCard `json:"unmatched_cards,omitempty"`
 }
 
 func NewPriceWorker(priceService *PriceService, pokemonService *PokemonHybridService, justTCG *JustTCGService) *PriceWorker {
@@ -235,41 +252,210 @@ func (w *PriceWorker) UpdateBatch() (updated int, err error) {
 }
 
 // batchUpdatePrices uses the batch API to update all cards at once
+// For Pokemon cards without TCGPlayerIDs, it syncs the set first to discover IDs
+// This ensures all cards can use efficient batch POST (no individual GETs)
 func (w *PriceWorker) batchUpdatePrices(cards []models.Card) (int, error) {
 	start := time.Now()
+	db := database.GetDB()
 
-	// Build lookup requests
-	lookups := make([]CardLookup, len(cards))
-	cardMap := make(map[string]*models.Card) // Keyed by CardID only
-
+	// First pass: identify Pokemon cards missing TCGPlayerIDs and sync their sets
+	setsToSync := make(map[string][]int) // setName -> indices of cards needing sync
 	for i, card := range cards {
-		gameStr := "pokemon"
-		if card.Game == models.GameMTG {
-			gameStr = "magic-the-gathering"
+		if card.Game == models.GamePokemon && card.TCGPlayerID == "" {
+			setName := card.SetName
+			if setName == "" {
+				setName = card.SetCode
+			}
+			setsToSync[setName] = append(setsToSync[setName], i)
 		}
-
-		lookups[i] = CardLookup{
-			CardID:  card.ID,
-			Name:    card.Name,
-			Set:     card.SetCode,
-			SetName: card.SetName, // Used for matching results from JustTCG
-			Game:    gameStr,
-		}
-		cardMap[card.ID] = &cards[i]
 	}
 
-	// Single batch request
-	results, err := w.justTCG.BatchGetPrices(lookups)
+	// Sync sets to discover TCGPlayerIDs before batch request
+	// Track which sets were successfully synced vs had intermittent failures
+	successfullySyncedSets := make(map[string]bool)
+	permanentlyFailedSets := make(map[string]string) // setName -> reason
+	var newUnmatchedCards []UnmatchedCard
+
+	if len(setsToSync) > 0 {
+		log.Printf("Price worker: syncing %d sets to discover TCGPlayerIDs", len(setsToSync))
+
+		for setName, cardIndices := range setsToSync {
+			// Check quota before each set sync - this is INTERMITTENT, will retry next batch
+			if w.justTCG.GetRequestsRemaining() < 2 {
+				log.Printf("Price worker: quota low, skipping set sync for %s (will retry)", setName)
+				continue // Don't mark as permanent failure
+			}
+
+			// Convert to JustTCG set ID - unknown mapping is PERMANENT
+			justTCGSetID := convertToJustTCGSetID(setName)
+			if justTCGSetID == "" {
+				reason := "Unknown set mapping - needs code update in tcgplayer_sync.go"
+				log.Printf("ERROR: Price worker: %s for set %q", reason, setName)
+				permanentlyFailedSets[setName] = reason
+				continue
+			}
+
+			// Fetch set data - API errors are INTERMITTENT
+			setData, err := w.justTCG.FetchSetTCGPlayerIDs(justTCGSetID)
+			if err != nil {
+				log.Printf("Price worker: failed to sync set %s: %v (will retry)", setName, err)
+				continue // Don't mark as permanent failure
+			}
+
+			// Set synced successfully
+			successfullySyncedSets[setName] = true
+
+			// Update cards with discovered TCGPlayerIDs
+			for _, idx := range cardIndices {
+				card := &cards[idx]
+				tcgPlayerID := ""
+
+				// Try matching by card number first
+				if card.CardNumber != "" {
+					normalizedNum := strings.TrimLeft(card.CardNumber, "0")
+					if normalizedNum == "" {
+						normalizedNum = "0"
+					}
+					if id, ok := setData.CardsByNum[normalizedNum]; ok {
+						tcgPlayerID = id
+					} else if id, ok := setData.CardsByNum[card.CardNumber]; ok {
+						tcgPlayerID = id
+					}
+				}
+
+				// Fallback to name matching
+				if tcgPlayerID == "" {
+					nameLower := strings.ToLower(card.Name)
+					if id, ok := setData.CardsByName[nameLower]; ok {
+						tcgPlayerID = id
+					}
+				}
+
+				if tcgPlayerID != "" {
+					card.TCGPlayerID = tcgPlayerID
+					// Save to DB immediately so it persists
+					db.Model(card).Update("tcg_player_id", tcgPlayerID)
+					log.Printf("Price worker: discovered TCGPlayerID %s for %s", tcgPlayerID, card.Name)
+
+					// Remove from unmatched list if it was there
+					w.ClearUnmatchedCard(card.ID)
+				} else {
+					// Set was synced successfully but card not found - this is PERMANENT
+					reason := "Card not found in JustTCG set data (checked by number and name)"
+					log.Printf("ERROR: Price worker: UNMATCHED CARD - %s (#%s) from set %q - %s",
+						card.Name, card.CardNumber, setName, reason)
+					newUnmatchedCards = append(newUnmatchedCards, UnmatchedCard{
+						CardID:     card.ID,
+						Name:       card.Name,
+						CardNumber: card.CardNumber,
+						SetName:    setName,
+						Reason:     reason,
+					})
+				}
+			}
+		}
+
+		// Add cards from permanently failed sets (unknown mapping)
+		for setName, reason := range permanentlyFailedSets {
+			for _, idx := range setsToSync[setName] {
+				card := &cards[idx]
+				newUnmatchedCards = append(newUnmatchedCards, UnmatchedCard{
+					CardID:     card.ID,
+					Name:       card.Name,
+					CardNumber: card.CardNumber,
+					SetName:    setName,
+					Reason:     reason,
+				})
+			}
+		}
+	}
+
+	// Build lookup requests (now all Pokemon cards should have TCGPlayerIDs)
+	lookups := make([]CardLookup, 0, len(cards))
+	cardMap := make(map[string]*models.Card)
+
+	for i := range cards {
+		card := &cards[i]
+		gameStr := "pokemon"
+		scryfallID := ""
+		tcgPlayerID := ""
+
+		if card.Game == models.GameMTG {
+			gameStr = "magic-the-gathering"
+			scryfallID = card.ID
+		} else {
+			tcgPlayerID = card.TCGPlayerID
+			// Skip Pokemon cards without TCGPlayerID
+			if tcgPlayerID == "" {
+				// Only mark as permanently unmatched if we actually tried to sync the set
+				// Cards from sets that were skipped due to quota/API errors will retry next batch
+				setName := card.SetName
+				if setName == "" {
+					setName = card.SetCode
+				}
+				_, wasSuccessfullySynced := successfullySyncedSets[setName]
+				_, wasPermanentlyFailed := permanentlyFailedSets[setName]
+
+				// If set wasn't processed at all (quota/API error), this is intermittent - don't add to unmatched
+				// Cards from successfully synced sets or permanently failed sets were already handled above
+				if !wasSuccessfullySynced && !wasPermanentlyFailed {
+					log.Printf("Price worker: skipping %s (set %s not synced yet, will retry)", card.Name, setName)
+				}
+				// Note: cards from successfully synced sets that weren't found are already in newUnmatchedCards
+				// Note: cards from permanently failed sets are already in newUnmatchedCards
+				continue
+			}
+		}
+
+		lookups = append(lookups, CardLookup{
+			CardID:      card.ID,
+			ScryfallID:  scryfallID,
+			TCGPlayerID: tcgPlayerID,
+			Name:        card.Name,
+			Set:         card.SetCode,
+			SetName:     card.SetName,
+			Game:        gameStr,
+		})
+		cardMap[card.ID] = card
+	}
+
+	// Track unmatched cards for API visibility
+	if len(newUnmatchedCards) > 0 {
+		w.mu.Lock()
+		// Merge with existing unmatched cards, avoiding duplicates
+		existingIDs := make(map[string]bool)
+		for _, c := range w.unmatchedCards {
+			existingIDs[c.CardID] = true
+		}
+		for _, c := range newUnmatchedCards {
+			if !existingIDs[c.CardID] {
+				w.unmatchedCards = append(w.unmatchedCards, c)
+			}
+		}
+		w.mu.Unlock()
+
+		log.Printf("ERROR: Price worker: %d cards PERMANENTLY SKIPPED (no TCGPlayerID found):", len(newUnmatchedCards))
+		for _, card := range newUnmatchedCards {
+			log.Printf("  - %s (#%s, set: %s)", card.Name, card.CardNumber, card.SetName)
+		}
+		log.Printf("These cards will not receive price updates until their TCGPlayerID is discovered. Check set mappings in tcgplayer_sync.go")
+	}
+
+	if len(lookups) == 0 {
+		log.Printf("Price worker: no cards with valid IDs to update")
+		return 0, nil
+	}
+
+	// Single batch POST request (all cards now have external IDs)
+	result, err := w.justTCG.BatchGetPrices(lookups)
 	if err != nil {
 		log.Printf("Price worker: batch request failed: %v", err)
 		return 0, err
 	}
 
-	// Save results - keys should be CardIDs from JustTCG service
+	// Save results
 	updated := 0
-	db := database.GetDB()
-
-	for cardID, prices := range results {
+	for cardID, prices := range result.Prices {
 		if len(prices) == 0 {
 			continue
 		}
@@ -298,6 +484,7 @@ func (w *PriceWorker) batchUpdatePrices(cards []models.Card) (int, error) {
 				card.PriceSource = p.Source
 			}
 		}
+
 		db.Save(card)
 		updated++
 	}
@@ -320,7 +507,8 @@ func (w *PriceWorker) batchUpdatePrices(cards []models.Card) (int, error) {
 	// Update collection metrics (includes updated values)
 	metrics.UpdateCollectionMetrics(db)
 
-	log.Printf("Price worker: batch updated %d card prices", updated)
+	log.Printf("Price worker: batch updated %d card prices (discovered %d TCGPlayerIDs)",
+		updated, len(result.DiscoveredTCGPIDs))
 	return updated, nil
 }
 
@@ -338,5 +526,26 @@ func (w *PriceWorker) GetStatus() PriceStatus {
 		DailyLimit:        w.priceService.GetJustTCGDailyLimit(),
 		Remaining:         w.priceService.GetJustTCGRequestsRemaining(),
 		ResetsAt:          w.priceService.GetJustTCGResetTime(),
+		UnmatchedCards:    w.unmatchedCards,
 	}
+}
+
+// ClearUnmatchedCard removes a card from the unmatched list (e.g., after manual fix)
+func (w *PriceWorker) ClearUnmatchedCard(cardID string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+
+	for i, c := range w.unmatchedCards {
+		if c.CardID == cardID {
+			w.unmatchedCards = append(w.unmatchedCards[:i], w.unmatchedCards[i+1:]...)
+			return
+		}
+	}
+}
+
+// ClearAllUnmatchedCards clears the unmatched cards list
+func (w *PriceWorker) ClearAllUnmatchedCards() {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.unmatchedCards = nil
 }

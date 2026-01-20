@@ -25,7 +25,9 @@ services:
       - GIN_MODE=release
       - IDENTIFIER_SERVICE_URL=http://identifier:8099
       - JUSTTCG_API_KEY=${JUSTTCG_API_KEY:-}
+      - JUSTTCG_DAILY_LIMIT=${JUSTTCG_DAILY_LIMIT:-1000}
       - ADMIN_KEY=${ADMIN_KEY:-}
+      - SYNC_TCGPLAYER_IDS_ON_STARTUP=${SYNC_TCGPLAYER_IDS_ON_STARTUP:-true}
     depends_on:
       - identifier
     volumes:

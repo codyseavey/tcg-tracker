@@ -64,8 +64,9 @@ Environment variables (see `backend/.env.example`):
 - `FRONTEND_DIST_PATH` - Path to built frontend (enables static serving)
 - `POKEMON_DATA_DIR` - Directory for pokemon-tcg-data (auto-downloaded on first run)
 - `JUSTTCG_API_KEY` - JustTCG API key for condition-based pricing (optional)
-- `JUSTTCG_DAILY_LIMIT` - Daily API request limit (default: 100)
+- `JUSTTCG_DAILY_LIMIT` - Daily API request limit (default: 1000)
 - `ADMIN_KEY` - Admin key for collection modification (optional, disables auth if not set)
+- `SYNC_TCGPLAYER_IDS_ON_STARTUP` - Set to "true" to auto-sync TCGPlayerIDs on startup
 
 ### Frontend
 ```bash
@@ -154,10 +155,16 @@ Base URL: `http://localhost:8080/api`
 - `PUT /collection/:id` - Update collection item with smart split/merge (🔒 requires admin key)
 - `DELETE /collection/:id` - Remove from collection (🔒 requires admin key)
 - `GET /collection/stats` - Get collection statistics
-- `POST /collection/refresh-prices` - Queue all collection cards for background price refresh (🔒 requires admin key)
+- `POST /collection/refresh-prices` - Immediately refresh prices for collection cards (up to 100 per batch) (🔒 requires admin key)
 
 ### Prices
 - `GET /prices/status` - Get API quota status and next update time
+
+### Admin (🔒 requires admin key)
+- `POST /admin/sync-tcgplayer-ids` - Start async TCGPlayerID sync for collection cards
+- `POST /admin/sync-tcgplayer-ids/blocking` - Sync TCGPlayerIDs and wait for completion
+- `POST /admin/sync-tcgplayer-ids/set/:setName` - Sync TCGPlayerIDs for a specific set
+- `GET /admin/sync-tcgplayer-ids/status` - Check sync status and quota
 
 ### Health & Monitoring
 - `GET /health` - Health check
@@ -172,7 +179,7 @@ Base URL: `http://localhost:8080/api`
 1. **Card Search**: User searches → Backend queries local Pokemon data or Scryfall API → Returns cards with cached prices
 2. **Card Scanning (Server OCR)**: Mobile captures image → Backend sends to identifier service → EasyOCR extracts text → Backend parses OCR text → Matches card by name/set/number
 3. **Card Scanning (Fallback)**: If server OCR unavailable → Mobile uses Google ML Kit locally → Sends text to backend for parsing
-4. **Price Updates**: Background worker runs every 15 minutes → Updates 20 cards per batch via JustTCG (skips when quota exhausted)
+4. **Price Updates**: Background worker runs every 15 minutes → Updates up to 100 cards per batch via JustTCG (skips when quota exhausted)
 
 ## Important Implementation Details
 
@@ -206,7 +213,36 @@ The background price worker (`PriceWorker`) updates prices with priority orderin
 2. **Collection cards without prices** - New additions needing initial pricing
 3. **Collection cards with oldest prices** - Stale cache refresh
 
-JustTCG batch API used for efficient updates (up to 20 cards per request).
+**JustTCG API Batching:**
+- **MTG cards**: Use efficient batch POST endpoint with `scryfallId` (1 request for up to 100 cards)
+- **Pokemon cards**: Set sync discovers `tcgplayerId`, then batch POST for prices
+- **Cached TCGPlayerIDs**: Once discovered, Pokemon cards use batch POST for subsequent lookups
+- MTG cards can always batch because our `Card.ID` IS the Scryfall UUID
+- Pokemon cards cache `TCGPlayerID` in the Card model after set sync
+
+**JustTCG API Limits (Paid Tier):**
+- 1000 requests/day, 50 requests/minute, 100 cards/request
+- Set sync: ~2-3 requests per set (100 cards/page)
+- Price batch: 1 request for up to 100 cards
+
+**TCGPlayerID Bulk Sync:**
+- `SYNC_TCGPLAYER_IDS_ON_STARTUP=true` triggers sync 5 seconds after server start
+- Fetches TCGPlayerIDs by set from JustTCG (~100 cards per request)
+- **Caveat**: Startup sync requires available quota; if exhausted, it stops and doesn't retry
+- Use `/api/admin/sync-tcgplayer-ids` to manually trigger sync when quota is available
+
+**Price Worker Set-First Strategy:**
+- Before each batch, worker checks for Pokemon cards missing TCGPlayerIDs
+- Groups cards by set, syncs each set first (~2-3 requests per set)
+- Then performs batch POST for prices (1 request for up to 100 cards)
+- **No individual GET requests** - cards without TCGPlayerIDs after set sync are skipped
+- Example: 100 Pokemon cards from 3 sets = ~9 set syncs + 1 batch = **~10 requests** (not 100)
+
+**Immediate Refresh:**
+- `POST /collection/refresh-prices` triggers an immediate batch update (doesn't wait for scheduled interval)
+- Useful for users who want prices updated right away after adding cards
+- Still respects rate limits and daily quota
+
 Worker skips updates when daily quota is exhausted (resets at midnight).
 Collection stats use condition and printing-appropriate prices.
 

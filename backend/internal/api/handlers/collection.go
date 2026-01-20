@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/base64"
 	"fmt"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
@@ -469,8 +470,9 @@ func (h *CollectionHandler) GetStats(c *gin.Context) {
 	c.JSON(http.StatusOK, stats)
 }
 
-// RefreshPrices queues all collection cards for price refresh via the PriceWorker.
-// Uses JustTCG as the sole price source for consistent, condition-based pricing.
+// RefreshPrices queues all collection cards for price refresh and immediately triggers
+// a batch update. Uses JustTCG as the sole price source for consistent, condition-based pricing.
+// With paid tier limits, this immediately fetches prices for up to 100 cards per batch.
 func (h *CollectionHandler) RefreshPrices(c *gin.Context) {
 	if h.priceWorker == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "price worker not available"})
@@ -495,12 +497,19 @@ func (h *CollectionHandler) RefreshPrices(c *gin.Context) {
 		queued++
 	}
 
+	// Immediately trigger a batch update (don't wait for scheduled interval)
+	updated, err := h.priceWorker.UpdateBatch()
+	if err != nil {
+		// Log error but don't fail the request - cards are still queued
+		log.Printf("RefreshPrices: immediate batch update failed: %v", err)
+	}
+
 	status := h.priceWorker.GetStatus()
 	c.JSON(http.StatusOK, gin.H{
-		"queued":           queued,
-		"queue_size":       status.QueueSize,
-		"next_update_time": status.NextUpdateTime,
-		"daily_remaining":  status.Remaining,
+		"queued":          queued,
+		"updated":         updated,
+		"queue_size":      status.QueueSize,
+		"daily_remaining": status.Remaining,
 	})
 }
 

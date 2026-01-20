@@ -25,6 +25,7 @@ type Card struct {
 	ImageURL       string      `json:"image_url"`
 	ImageURLLarge  string      `json:"image_url_large"`
 	PriceSource    string      `json:"price_source"` // "api", "cached", or "pending"
+	TCGPlayerID    string      `json:"tcgplayer_id"` // Cached from JustTCG for batch lookups
 	Game           Game        `json:"game" gorm:"not null;index"`
 	PriceUSD       float64     `json:"price_usd"`      // Backward compat: NM non-foil price
 	PriceFoilUSD   float64     `json:"price_foil_usd"` // Backward compat: NM foil price

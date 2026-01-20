@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../models/price_status.dart';
 
 /// A simple stats display card used on the dashboard
 class StatsCard extends StatelessWidget {
@@ -32,11 +33,7 @@ class StatsCard extends StatelessWidget {
             Row(
               children: [
                 if (icon != null) ...[
-                  Icon(
-                    icon,
-                    size: 20,
-                    color: iconColor ?? colorScheme.primary,
-                  ),
+                  Icon(icon, size: 20, color: iconColor ?? colorScheme.primary),
                   const SizedBox(width: 8),
                 ],
                 Expanded(
@@ -139,12 +136,7 @@ class GameBreakdownCard extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            game,
-            style: theme.textTheme.bodyMedium,
-          ),
-        ),
+        Expanded(child: Text(game, style: theme.textTheme.bodyMedium)),
         Text(
           '$count cards',
           style: theme.textTheme.bodySmall?.copyWith(
@@ -201,11 +193,7 @@ class PriceQuotaCard extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(
-                  Icons.api_outlined,
-                  size: 20,
-                  color: colorScheme.primary,
-                ),
+                Icon(Icons.api_outlined, size: 20, color: colorScheme.primary),
                 const SizedBox(width: 8),
                 Text(
                   'Pokemon Price API',
@@ -249,6 +237,89 @@ class PriceQuotaCard extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A warning card showing cards that can't receive price updates
+class UnmatchedCardsWarning extends StatefulWidget {
+  final List<UnmatchedCard> unmatchedCards;
+
+  const UnmatchedCardsWarning({super.key, required this.unmatchedCards});
+
+  @override
+  State<UnmatchedCardsWarning> createState() => _UnmatchedCardsWarningState();
+}
+
+class _UnmatchedCardsWarningState extends State<UnmatchedCardsWarning> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.unmatchedCards.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final theme = Theme.of(context);
+    final count = widget.unmatchedCards.length;
+
+    return Card(
+      color: Colors.amber.shade50,
+      child: Theme(
+        data: theme.copyWith(dividerColor: Colors.transparent),
+        child: ExpansionTile(
+          initiallyExpanded: _expanded,
+          onExpansionChanged: (expanded) {
+            setState(() => _expanded = expanded);
+          },
+          leading: Icon(
+            Icons.warning_amber_rounded,
+            color: Colors.amber.shade700,
+          ),
+          title: Text(
+            '$count card${count == 1 ? '' : 's'} cannot receive price updates',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              fontWeight: FontWeight.w600,
+              color: Colors.amber.shade900,
+            ),
+          ),
+          subtitle: Text(
+            'These cards could not be matched in the pricing database',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: Colors.amber.shade800,
+            ),
+          ),
+          children: [
+            const Divider(height: 1),
+            ListView.separated(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              itemCount: widget.unmatchedCards.length,
+              separatorBuilder: (context, index) =>
+                  Divider(height: 1, color: Colors.amber.shade200),
+              itemBuilder: (context, index) {
+                final card = widget.unmatchedCards[index];
+                return ListTile(
+                  dense: true,
+                  title: Text(
+                    card.name,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w500,
+                      color: Colors.amber.shade900,
+                    ),
+                  ),
+                  subtitle: Text(
+                    '${card.setName}${card.cardNumber.isNotEmpty ? ' #${card.cardNumber}' : ''}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: Colors.amber.shade700,
+                    ),
+                  ),
+                );
+              },
             ),
           ],
         ),

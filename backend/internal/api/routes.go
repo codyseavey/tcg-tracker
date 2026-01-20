@@ -16,7 +16,7 @@ import (
 	"github.com/codyseavey/tcg-tracker/backend/internal/services"
 )
 
-func SetupRouter(scryfallService *services.ScryfallService, pokemonService *services.PokemonHybridService, priceWorker *services.PriceWorker, priceService *services.PriceService, imageStorageService *services.ImageStorageService, snapshotService *services.SnapshotService) *gin.Engine {
+func SetupRouter(scryfallService *services.ScryfallService, pokemonService *services.PokemonHybridService, priceWorker *services.PriceWorker, priceService *services.PriceService, imageStorageService *services.ImageStorageService, snapshotService *services.SnapshotService, tcgPlayerSync *services.TCGPlayerSyncService, justTCG *services.JustTCGService) *gin.Engine {
 	router := gin.Default()
 
 	// Get frontend dist path from env
@@ -42,6 +42,7 @@ func SetupRouter(scryfallService *services.ScryfallService, pokemonService *serv
 	cardHandler := handlers.NewCardHandler(scryfallService, pokemonService)
 	collectionHandler := handlers.NewCollectionHandler(scryfallService, pokemonService, imageStorageService, snapshotService, priceWorker)
 	priceHandler := handlers.NewPriceHandler(priceWorker, priceService)
+	adminHandler := handlers.NewAdminHandler(tcgPlayerSync, justTCG)
 
 	// Serve scanned images
 	if imageStorageService != nil {
@@ -93,6 +94,17 @@ func SetupRouter(scryfallService *services.ScryfallService, pokemonService *serv
 		prices := api.Group("/prices")
 		{
 			prices.GET("/status", priceHandler.GetPriceStatus)
+		}
+
+		// Admin routes (protected)
+		admin := api.Group("/admin")
+		admin.Use(adminAuth)
+		{
+			// TCGPlayerID sync endpoints
+			admin.POST("/sync-tcgplayer-ids", adminHandler.SyncTCGPlayerIDs)
+			admin.POST("/sync-tcgplayer-ids/blocking", adminHandler.SyncTCGPlayerIDsBlocking)
+			admin.POST("/sync-tcgplayer-ids/set/:setName", adminHandler.SyncSetTCGPlayerIDs)
+			admin.GET("/sync-tcgplayer-ids/status", adminHandler.GetSyncStatus)
 		}
 	}
 

@@ -18,8 +18,8 @@ import (
 
 const (
 	justTCGBaseURL   = "https://api.justtcg.com/v1"
-	justTCGBatchSize = 20 // Max cards per request
-	justTCGRateLimit = 10 // Requests per minute
+	justTCGBatchSize = 100 // Max cards per request (paid tier)
+	justTCGRateLimit = 50  // Requests per minute (paid tier)
 )
 
 // JustTCGService handles API calls to JustTCG for card pricing
@@ -28,7 +28,7 @@ type JustTCGService struct {
 	apiKey  string
 	baseURL string
 
-	// Rate limiting (10 requests per minute)
+	// Rate limiting (50 requests per minute for paid tier)
 	rateLimiter *rate.Limiter
 
 	// Daily/monthly tracking
@@ -90,20 +90,34 @@ type JustTCGUsage struct {
 type CardLookup struct {
 	CardID      string // Our internal card ID (for mapping results back)
 	TCGPlayerID string `json:"tcgplayerId,omitempty"`
+	ScryfallID  string `json:"scryfallId,omitempty"` // For MTG cards - enables batch POST lookup
 	Name        string `json:"q,omitempty"`
 	Set         string `json:"set,omitempty"`      // Our set code (not sent to API, used internally)
 	SetName     string `json:"set_name,omitempty"` // Human-readable set name for matching results
 	Game        string `json:"game,omitempty"`
 }
 
+// batchPostRequest is the request body for batch POST lookups
+type batchPostRequest struct {
+	ScryfallID  string `json:"scryfallId,omitempty"`
+	TCGPlayerID string `json:"tcgplayerId,omitempty"`
+	Condition   string `json:"condition,omitempty"`
+}
+
+// BatchPriceResult contains prices and any discovered external IDs
+type BatchPriceResult struct {
+	Prices            map[string][]models.CardPrice // cardID -> prices
+	DiscoveredTCGPIDs map[string]string             // cardID -> tcgplayerId (discovered during fetch)
+}
+
 // NewJustTCGService creates a new JustTCG API service
 func NewJustTCGService(apiKey string, dailyLimit int) *JustTCGService {
 	if dailyLimit <= 0 {
-		dailyLimit = 100 // Default free tier limit
+		dailyLimit = 1000 // Default paid tier limit
 	}
 
-	// Rate limiter: 10 requests per minute = 1 request every 6 seconds
-	limiter := rate.NewLimiter(rate.Every(6*time.Second), 1)
+	// Rate limiter: 50 requests per minute (paid tier) = 1 request every 1.2 seconds
+	limiter := rate.NewLimiter(rate.Every(1200*time.Millisecond), 1)
 
 	return &JustTCGService{
 		client: &http.Client{
@@ -173,277 +187,277 @@ func (s *JustTCGService) GetResetTime() time.Time {
 	return time.Date(now.Year(), now.Month(), now.Day()+1, 0, 0, 0, 0, now.Location())
 }
 
-// GetCardPrices fetches condition-specific prices for a single card
-// This is a convenience wrapper around BatchGetPrices for backward compatibility
+// GetCardPrices fetches condition-specific prices for a single card by name.
+// Uses the search endpoint and attempts to match by set when provided.
 func (s *JustTCGService) GetCardPrices(cardName, setCode string, game models.Game) ([]models.CardPrice, error) {
+	if strings.TrimSpace(cardName) == "" {
+		return nil, nil
+	}
+
 	gameStr := "pokemon"
 	if game == models.GameMTG {
 		gameStr = "magic-the-gathering"
 	}
 
-	lookup := CardLookup{
-		CardID: "", // Will be set by caller
-		Name:   cardName,
-		Set:    setCode,
-		Game:   gameStr,
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := s.rateLimiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("rate limit wait failed: %w", err)
 	}
 
-	results, err := s.BatchGetPrices([]CardLookup{lookup})
+	if !s.checkDailyLimit() {
+		return nil, fmt.Errorf("JustTCG daily rate limit exceeded")
+	}
+
+	params := url.Values{}
+	params.Set("game", gameStr)
+	params.Set("q", cardName)
+	params.Set("limit", "50")
+	params.Set("include_price_history", "false")
+	params.Set("include_statistics", "")
+
+	setParam := ""
+	if setCode != "" {
+		if game == models.GamePokemon {
+			setParam = convertToJustTCGSetID(setCode)
+		} else {
+			setParam = strings.ToLower(setCode)
+		}
+	}
+	if setParam != "" {
+		params.Set("set", setParam)
+	}
+
+	reqURL := fmt.Sprintf("%s/cards?%s", s.baseURL, params.Encode())
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	// Return the first result (there should only be one)
-	for _, prices := range results {
-		return prices, nil
+	s.setHeaders(req)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch card prices: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("JustTCG API error: status %d", resp.StatusCode)
 	}
 
-	return nil, nil
+	var apiResp JustTCGResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	if apiResp.Error != "" {
+		return nil, fmt.Errorf("JustTCG API error: %s", apiResp.Error)
+	}
+
+	s.updateRemaining(apiResp.Metadata.APIDailyRequestsRemaining)
+
+	if len(apiResp.Data) == 0 {
+		return nil, nil
+	}
+
+	nameTarget := strings.ToLower(extractBaseName(cardName))
+	setCodeLower := strings.ToLower(strings.TrimSpace(setCode))
+	setParamLower := strings.ToLower(setParam)
+	setNameTarget := normalizeSetName(setCode)
+
+	setMatches := func(card JustTCGCard) bool {
+		if setCodeLower == "" {
+			return true
+		}
+		cardSet := strings.ToLower(card.Set)
+		if setParamLower != "" && cardSet == setParamLower {
+			return true
+		}
+		if cardSet == setCodeLower {
+			return true
+		}
+		if setNameTarget == "" {
+			return false
+		}
+		return normalizeSetName(card.SetName) == setNameTarget
+	}
+
+	var matched *JustTCGCard
+	var nameMatch *JustTCGCard
+	for i := range apiResp.Data {
+		card := &apiResp.Data[i]
+		if strings.ToLower(extractBaseName(card.Name)) != nameTarget {
+			continue
+		}
+		if setMatches(*card) {
+			matched = card
+			break
+		}
+		if nameMatch == nil {
+			nameMatch = card
+		}
+	}
+
+	if matched == nil {
+		matched = nameMatch
+	}
+
+	if matched == nil {
+		return nil, nil
+	}
+
+	prices := s.convertVariantsToPrices(matched.Variants)
+	if len(prices) == 0 {
+		return nil, nil
+	}
+
+	return prices, nil
 }
 
-// BatchGetPrices fetches prices for multiple cards.
-// Note: The JustTCG batch POST endpoint only accepts identifiers (tcgplayerId, etc.),
-// not name-based searches. Since we store Pokemon TCG API IDs (not JustTCG IDs),
-// we must use individual GET requests which support the 'q' (search) parameter.
-// This means batches use N API requests instead of 1, but it's the only way to
-// search by card name without storing JustTCG's internal IDs.
-func (s *JustTCGService) BatchGetPrices(lookups []CardLookup) (map[string][]models.CardPrice, error) {
+// BatchGetPrices fetches prices for multiple cards using the batch POST endpoint.
+// All cards must have either TCGPlayerID or ScryfallID - cards without are skipped.
+// The price worker is responsible for syncing sets to discover TCGPlayerIDs before calling this.
+// Uses 1 API request for up to 100 cards (paid tier).
+func (s *JustTCGService) BatchGetPrices(lookups []CardLookup) (*BatchPriceResult, error) {
 	if len(lookups) == 0 {
-		return nil, nil
+		return &BatchPriceResult{
+			Prices:            make(map[string][]models.CardPrice),
+			DiscoveredTCGPIDs: make(map[string]string),
+		}, nil
 	}
 	if len(lookups) > justTCGBatchSize {
 		return nil, fmt.Errorf("batch size %d exceeds max %d", len(lookups), justTCGBatchSize)
 	}
 
-	// For single card lookup, use the optimized single card function
-	if len(lookups) == 1 {
-		// Wait for rate limiter
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if err := s.rateLimiter.Wait(ctx); err != nil {
-			return nil, fmt.Errorf("rate limit wait failed: %w", err)
-		}
-
-		// Check daily limit
-		if !s.checkDailyLimit() {
-			return nil, fmt.Errorf("JustTCG daily rate limit exceeded")
-		}
-
-		return s.getSingleCard(lookups[0])
-	}
-
-	// For multiple cards, use sequential GET requests
-	// (POST batch endpoint doesn't support name-based search)
-	return s.fetchCardsSequentially(lookups)
-}
-
-// getSingleCard fetches a single card using GET request
-func (s *JustTCGService) getSingleCard(lookup CardLookup) (map[string][]models.CardPrice, error) {
-	params := url.Values{}
-	if lookup.Name != "" {
-		params.Set("q", lookup.Name)
-	}
-	if lookup.Game != "" {
-		params.Set("game", lookup.Game)
-	}
-	// Don't send "set" - JustTCG uses different set codes that don't match ours
-	// Request all conditions but limit stats to reduce response size
-	params.Set("include_price_history", "false")
-	params.Set("include_statistics", "")
-
-	reqURL := fmt.Sprintf("%s/cards?%s", s.baseURL, params.Encode())
-
-	req, err := http.NewRequestWithContext(context.Background(), "GET", reqURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
-	}
-
-	s.setHeaders(req)
-
-	resp, err := s.client.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch prices: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("JustTCG API error: status %d", resp.StatusCode)
-	}
-
-	var apiResp JustTCGResponse
-	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	if apiResp.Error != "" {
-		return nil, fmt.Errorf("JustTCG API error: %s", apiResp.Error)
-	}
-
-	// Convert response to CardPrice map, matching by set_name
-	results := make(map[string][]models.CardPrice)
-	normalizedLookupSetName := normalizeSetName(lookup.SetName)
-
-	for _, card := range apiResp.Data {
-		prices := s.convertVariantsToPrices(card.Variants)
-		if len(prices) == 0 {
-			continue
-		}
-
-		// If we have a CardID, try to match by set_name first
-		if lookup.CardID != "" {
-			baseName := extractBaseName(card.Name)
-			normalizedSetName := normalizeSetName(card.SetName)
-
-			// Match if set names align (or if we don't have set_name to compare)
-			if normalizedLookupSetName == "" || normalizedSetName == normalizedLookupSetName {
-				// Also check name matches
-				if strings.EqualFold(baseName, lookup.Name) {
-					results[lookup.CardID] = prices
-					break // Found our match
-				}
-			}
-		} else {
-			// No CardID, use card name as key
-			results[card.Name] = prices
-		}
-	}
-
-	s.updateRemaining(apiResp.Metadata.APIDailyRequestsRemaining)
-
-	log.Printf("JustTCG: fetched %d cards, %d with prices (remaining: %d daily)",
-		len(apiResp.Data), len(results), apiResp.Metadata.APIDailyRequestsRemaining)
-
-	return results, nil
-}
-
-// fetchCardsSequentially fetches multiple cards using individual GET requests.
-// The JustTCG batch POST endpoint only accepts identifiers (tcgplayerId, cardId, etc.),
-// not name-based searches. Since we don't store JustTCG's IDs, we must use GET requests
-// which support the 'q' (search) parameter.
-//
-// Note: This uses one API request per card, so batches of 20 cards = 20 API requests.
-// Consider storing TCGPlayerID in the future to enable true batch lookups.
-func (s *JustTCGService) fetchCardsSequentially(lookups []CardLookup) (map[string][]models.CardPrice, error) {
-	results := make(map[string][]models.CardPrice)
-
+	// Filter to only cards with external IDs (TCGPlayerID or ScryfallID)
+	var batchableLookups []CardLookup
 	for _, lookup := range lookups {
-		// Each GET request counts against the daily limit, check before each call
-		if !s.checkDailyLimit() {
-			log.Printf("JustTCG: daily limit reached during batch processing, stopping early")
-			break
-		}
-
-		// Wait for rate limiter before each request
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		if err := s.rateLimiter.Wait(ctx); err != nil {
-			cancel()
-			log.Printf("JustTCG: rate limit wait failed for %s: %v", lookup.Name, err)
-			continue
-		}
-		cancel()
-
-		// Make the GET request for this single card
-		cardResults, err := s.fetchSingleCardInternal(lookup)
-		if err != nil {
-			log.Printf("JustTCG: failed to fetch %s: %v", lookup.Name, err)
-			continue
-		}
-
-		// Merge results
-		for k, v := range cardResults {
-			results[k] = v
+		if lookup.TCGPlayerID != "" || lookup.ScryfallID != "" {
+			batchableLookups = append(batchableLookups, lookup)
+		} else {
+			log.Printf("JustTCG: skipping card %s - no external ID", lookup.CardID)
 		}
 	}
 
-	log.Printf("JustTCG: batch fetched %d cards with prices via individual GETs", len(results))
-	return results, nil
+	if len(batchableLookups) == 0 {
+		return &BatchPriceResult{
+			Prices:            make(map[string][]models.CardPrice),
+			DiscoveredTCGPIDs: make(map[string]string),
+		}, nil
+	}
+
+	// Single batch POST request for all cards
+	return s.fetchCardsBatchPost(batchableLookups)
 }
 
-// fetchSingleCardInternal does the actual GET request without checking daily limit
-// (the caller handles rate limiting and quota)
-func (s *JustTCGService) fetchSingleCardInternal(lookup CardLookup) (map[string][]models.CardPrice, error) {
+// fetchCardsBatchPost fetches multiple cards using a single POST request.
+// This is the efficient path for cards with TCGPlayerID or ScryfallID.
+// Uses 1 API request for up to 100 cards (paid tier).
+func (s *JustTCGService) fetchCardsBatchPost(lookups []CardLookup) (*BatchPriceResult, error) {
+	if len(lookups) == 0 {
+		return &BatchPriceResult{
+			Prices:            make(map[string][]models.CardPrice),
+			DiscoveredTCGPIDs: make(map[string]string),
+		}, nil
+	}
+
+	// Wait for rate limiter (single request for the whole batch)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := s.rateLimiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("rate limit wait failed: %w", err)
+	}
+
+	// Check daily limit (counts as 1 request regardless of batch size)
+	if !s.checkDailyLimit() {
+		return nil, fmt.Errorf("JustTCG daily rate limit exceeded")
+	}
+
+	// Build request body - prefer TCGPlayerID, fallback to ScryfallID
+	requestBody := make([]batchPostRequest, len(lookups))
+
+	for i, lookup := range lookups {
+		req := batchPostRequest{}
+		if lookup.TCGPlayerID != "" {
+			req.TCGPlayerID = lookup.TCGPlayerID
+		} else if lookup.ScryfallID != "" {
+			req.ScryfallID = lookup.ScryfallID
+		}
+		requestBody[i] = req
+	}
+
+	bodyBytes, err := json.Marshal(requestBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal batch request: %w", err)
+	}
+
+	// Build URL with query params to reduce response size
 	params := url.Values{}
-	if lookup.Name != "" {
-		params.Set("q", lookup.Name)
-	}
-	if lookup.Game != "" {
-		params.Set("game", lookup.Game)
-	}
 	params.Set("include_price_history", "false")
 	params.Set("include_statistics", "")
 
 	reqURL := fmt.Sprintf("%s/cards?%s", s.baseURL, params.Encode())
 
-	req, err := http.NewRequestWithContext(context.Background(), "GET", reqURL, nil)
+	req, err := http.NewRequestWithContext(ctx, "POST", reqURL, strings.NewReader(string(bodyBytes)))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create request: %w", err)
+		return nil, fmt.Errorf("failed to create batch request: %w", err)
 	}
 
 	s.setHeaders(req)
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch prices: %w", err)
+		return nil, fmt.Errorf("batch request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("JustTCG API error: status %d", resp.StatusCode)
+		return nil, fmt.Errorf("JustTCG batch API error: status %d", resp.StatusCode)
 	}
 
 	var apiResp JustTCGResponse
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
-		return nil, fmt.Errorf("failed to decode response: %w", err)
+		return nil, fmt.Errorf("failed to decode batch response: %w", err)
 	}
 
 	if apiResp.Error != "" {
-		return nil, fmt.Errorf("JustTCG API error: %s", apiResp.Error)
+		return nil, fmt.Errorf("JustTCG batch API error: %s", apiResp.Error)
 	}
 
-	// Convert response to CardPrice map, matching by set_name
-	results := make(map[string][]models.CardPrice)
-	normalizedLookupSetName := normalizeSetName(lookup.SetName)
+	result := &BatchPriceResult{
+		Prices:            make(map[string][]models.CardPrice),
+		DiscoveredTCGPIDs: make(map[string]string),
+	}
 
-	for _, card := range apiResp.Data {
+	// Match responses to lookups by index (JustTCG returns cards in same order as request)
+	// We also collect any TCGPlayerIDs we discover
+	for i, card := range apiResp.Data {
+		if i >= len(lookups) {
+			break // More results than lookups (shouldn't happen)
+		}
+
 		prices := s.convertVariantsToPrices(card.Variants)
 		if len(prices) == 0 {
 			continue
 		}
 
-		// If we have a CardID, try to match by set_name first
-		if lookup.CardID != "" {
-			baseName := extractBaseName(card.Name)
-			normalizedSetName := normalizeSetName(card.SetName)
+		lookup := lookups[i]
+		result.Prices[lookup.CardID] = prices
 
-			// Match if set names align (or if we don't have set_name to compare)
-			if normalizedLookupSetName == "" || normalizedSetName == normalizedLookupSetName {
-				// Also check name matches
-				if strings.EqualFold(baseName, lookup.Name) {
-					results[lookup.CardID] = prices
-					s.updateRemaining(apiResp.Metadata.APIDailyRequestsRemaining)
-					return results, nil // Found our match
-				}
-			}
-		}
-	}
-
-	// No exact match found, try fallback matching
-	for _, card := range apiResp.Data {
-		prices := s.convertVariantsToPrices(card.Variants)
-		if len(prices) == 0 {
-			continue
-		}
-		baseName := extractBaseName(card.Name)
-		// Name-only match as fallback
-		if lookup.CardID != "" && strings.EqualFold(baseName, lookup.Name) {
-			results[lookup.CardID] = prices
-			s.updateRemaining(apiResp.Metadata.APIDailyRequestsRemaining)
-			return results, nil
+		// Discover TCGPlayerID if we don't have it
+		if lookup.TCGPlayerID == "" && card.TCGPlayerID != "" {
+			result.DiscoveredTCGPIDs[lookup.CardID] = card.TCGPlayerID
 		}
 	}
 
 	s.updateRemaining(apiResp.Metadata.APIDailyRequestsRemaining)
-	return results, nil
+
+	log.Printf("JustTCG: batch POST fetched %d/%d cards with prices (remaining: %d daily)",
+		len(result.Prices), len(lookups), apiResp.Metadata.APIDailyRequestsRemaining)
+
+	return result, nil
 }
 
 // setHeaders sets common headers for API requests
@@ -586,4 +600,174 @@ func extractBaseName(name string) string {
 		return strings.TrimSpace(name[:idx])
 	}
 	return name
+}
+
+// SetTCGPlayerIDMap holds TCGPlayerIDs for cards in a set, keyed by card number
+type SetTCGPlayerIDMap struct {
+	SetName     string            // JustTCG set name
+	CardsByNum  map[string]string // card number -> TCGPlayerID
+	CardsByName map[string]string // lowercase card name -> TCGPlayerID (fallback)
+	TotalCards  int
+}
+
+// FetchSetTCGPlayerIDs fetches all cards from a JustTCG set and returns their TCGPlayerIDs.
+// This enables bulk prepopulation of TCGPlayerIDs for efficient batching.
+// setID should be in JustTCG format, e.g., "vivid-voltage-pokemon"
+func (s *JustTCGService) FetchSetTCGPlayerIDs(setID string) (*SetTCGPlayerIDMap, error) {
+	// Wait for rate limiter
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if err := s.rateLimiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("rate limit wait failed: %w", err)
+	}
+
+	// Check daily limit
+	if !s.checkDailyLimit() {
+		return nil, fmt.Errorf("JustTCG daily rate limit exceeded")
+	}
+
+	result := &SetTCGPlayerIDMap{
+		SetName:     setID,
+		CardsByNum:  make(map[string]string),
+		CardsByName: make(map[string]string),
+	}
+
+	// Fetch all cards from the set (paginated)
+	offset := 0
+	limit := 100 // Paid tier allows 100 per request
+
+	for {
+		params := url.Values{}
+		params.Set("game", "pokemon")
+		params.Set("set", setID)
+		params.Set("limit", fmt.Sprintf("%d", limit))
+		params.Set("offset", fmt.Sprintf("%d", offset))
+		params.Set("include_price_history", "false")
+		params.Set("include_statistics", "")
+
+		reqURL := fmt.Sprintf("%s/cards?%s", s.baseURL, params.Encode())
+
+		req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create request: %w", err)
+		}
+
+		s.setHeaders(req)
+
+		resp, err := s.client.Do(req)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch set cards: %w", err)
+		}
+
+		var apiResp JustTCGResponse
+		if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+			resp.Body.Close()
+			return nil, fmt.Errorf("failed to decode response: %w", err)
+		}
+		resp.Body.Close()
+
+		if apiResp.Error != "" {
+			return nil, fmt.Errorf("JustTCG API error: %s", apiResp.Error)
+		}
+
+		s.updateRemaining(apiResp.Metadata.APIDailyRequestsRemaining)
+
+		// Extract TCGPlayerIDs from cards
+		for _, card := range apiResp.Data {
+			if card.TCGPlayerID == "" {
+				continue
+			}
+
+			// Store by card number (primary match)
+			if card.Number != "" && card.Number != "N/A" {
+				result.CardsByNum[card.Number] = card.TCGPlayerID
+			}
+
+			// Store by name (fallback match)
+			baseName := strings.ToLower(extractBaseName(card.Name))
+			result.CardsByName[baseName] = card.TCGPlayerID
+		}
+
+		result.TotalCards += len(apiResp.Data)
+
+		// Check if there are more pages
+		if apiResp.Meta == nil || !apiResp.Meta.HasMore {
+			break
+		}
+
+		offset += limit
+
+		// Check daily limit before each pagination request
+		if !s.checkDailyLimit() {
+			log.Printf("JustTCG: daily limit reached during pagination for set %s", setID)
+			break
+		}
+
+		// Rate limit between pages
+		if err := s.rateLimiter.Wait(ctx); err != nil {
+			log.Printf("JustTCG: rate limit wait failed during pagination: %v", err)
+			break
+		}
+	}
+
+	log.Printf("JustTCG: fetched %d cards from set %s, found %d TCGPlayerIDs",
+		result.TotalCards, setID, len(result.CardsByNum))
+
+	return result, nil
+}
+
+// FetchAllPokemonSets fetches the list of all Pokemon sets from JustTCG
+func (s *JustTCGService) FetchAllPokemonSets() ([]string, error) {
+	// Wait for rate limiter
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := s.rateLimiter.Wait(ctx); err != nil {
+		return nil, fmt.Errorf("rate limit wait failed: %w", err)
+	}
+
+	// Check daily limit
+	if !s.checkDailyLimit() {
+		return nil, fmt.Errorf("JustTCG daily rate limit exceeded")
+	}
+
+	params := url.Values{}
+	params.Set("game", "pokemon")
+
+	reqURL := fmt.Sprintf("%s/sets?%s", s.baseURL, params.Encode())
+
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	s.setHeaders(req)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch sets: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Parse response - sets endpoint returns different structure
+	var setsResp struct {
+		Data []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"data"`
+		Metadata JustTCGUsage `json:"_metadata"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&setsResp); err != nil {
+		return nil, fmt.Errorf("failed to decode response: %w", err)
+	}
+
+	s.updateRemaining(setsResp.Metadata.APIDailyRequestsRemaining)
+
+	var setIDs []string
+	for _, set := range setsResp.Data {
+		setIDs = append(setIDs, set.ID)
+	}
+
+	log.Printf("JustTCG: fetched %d Pokemon sets", len(setIDs))
+	return setIDs, nil
 }

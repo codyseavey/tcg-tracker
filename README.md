@@ -35,7 +35,8 @@ A trading card collection tracker for Magic: The Gathering and Pokemon cards wit
 - **Card Search**: Search for MTG and Pokemon cards using external APIs
 - **OCR Card Identification**: Upload card images for automatic identification using GPU-accelerated OCR
 - **Collection Management**: Add, update, and remove cards from your collection
-- **Price Tracking**: View current market prices with automatic refresh
+- **Price Tracking**: View current market prices with automatic refresh and batch updates
+- **TCGPlayerID Sync**: Admin tools to prepopulate Pokemon TCGPlayerIDs for faster pricing
 - **Mobile Scanning**: Use your phone camera to scan and identify cards
 - **Fast Card Matching**: Inverted index enables sub-2ms card matching for good OCR
 - **Prometheus Metrics**: Export metrics for monitoring with Grafana dashboards
@@ -107,7 +108,8 @@ Environment variables:
 - `IDENTIFIER_SERVICE_URL` - Identifier service URL (default: http://127.0.0.1:8099)
 - `ADMIN_KEY` - Admin key for collection modification (optional, auth disabled if not set)
 - `JUSTTCG_API_KEY` - JustTCG API key for condition-based pricing
-- `JUSTTCG_DAILY_LIMIT` - Daily API request limit (default: 100)
+- `JUSTTCG_DAILY_LIMIT` - Daily API request limit (default: 1000)
+- `SYNC_TCGPLAYER_IDS_ON_STARTUP` - Set to "true" to sync missing Pokemon TCGPlayerIDs on startup
 
 #### 2. Frontend (Vue.js Web App)
 
@@ -150,8 +152,10 @@ Configure the server URL in settings to point to your backend IP.
 ### Cards
 - `GET /api/cards/search?q={query}&game={mtg|pokemon}` - Search for cards
 - `GET /api/cards/:id?game={mtg|pokemon}` - Get card details
+- `GET /api/cards/:id/prices` - Get condition-specific prices for a card
 - `POST /api/cards/identify` - Identify card from OCR text
 - `POST /api/cards/identify-image` - Identify card from uploaded image
+- `GET /api/cards/ocr-status` - Check if server-side OCR is available
 
 ### Auth
 - `GET /api/auth/status` - Check if authentication is enabled
@@ -164,6 +168,16 @@ Configure the server URL in settings to point to your backend IP.
 - `PUT /api/collection/:id` - Update collection item with smart split/merge (🔒)
 - `DELETE /api/collection/:id` - Remove from collection (🔒)
 - `GET /api/collection/stats` - Get collection statistics
+- `POST /api/collection/refresh-prices` - Immediately refresh prices for collection cards (🔒)
+
+### Prices
+- `GET /api/prices/status` - Get pricing quota status and next update time
+
+### Admin (🔒)
+- `POST /api/admin/sync-tcgplayer-ids` - Start async TCGPlayerID sync for collection cards
+- `POST /api/admin/sync-tcgplayer-ids/blocking` - Sync TCGPlayerIDs and wait for completion
+- `POST /api/admin/sync-tcgplayer-ids/set/:setName` - Sync TCGPlayerIDs for a specific set
+- `GET /api/admin/sync-tcgplayer-ids/status` - Check sync status and quota
 
 *🔒 = Requires admin key if `ADMIN_KEY` is set*
 
@@ -227,7 +241,8 @@ The system uses a two-tier OCR approach for card identification:
 ### JustTCG (Pricing)
 - Provides condition-specific pricing for Pokemon cards
 - API key required
-- Daily limit configurable via `JUSTTCG_DAILY_LIMIT`
+- Daily limit configurable via `JUSTTCG_DAILY_LIMIT` (free tier 100/day, paid tier 1000/day)
+- Batch pricing uses TCGPlayerIDs for up to 100 cards per request
 
 ## Monitoring
 

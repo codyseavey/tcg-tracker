@@ -75,6 +75,14 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     resetTime: provider.priceStatus.resetTimeDisplay,
                     loading: provider.priceStatusLoading,
                   ),
+
+                  // Unmatched cards warning
+                  if (provider.priceStatus.hasUnmatchedCards) ...[
+                    const SizedBox(height: 12),
+                    UnmatchedCardsWarning(
+                      unmatchedCards: provider.priceStatus.unmatchedCards,
+                    ),
+                  ],
                   const SizedBox(height: 24),
 
                   // Recent additions
@@ -178,7 +186,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  Widget _buildRecentSection(BuildContext context, CollectionProvider provider) {
+  Widget _buildRecentSection(
+    BuildContext context,
+    CollectionProvider provider,
+  ) {
     final theme = Theme.of(context);
     final recentItems = provider.recentAdditions;
 

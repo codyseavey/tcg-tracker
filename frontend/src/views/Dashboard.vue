@@ -39,6 +39,14 @@ const quotaColor = computed(() => {
   return 'bg-red-500'
 })
 
+const unmatchedCards = computed(() => {
+  return priceStatus.value?.unmatched_cards || []
+})
+
+const showUnmatchedWarning = computed(() => {
+  return unmatchedCards.value.length > 0
+})
+
 const formatResetTime = (dateString) => {
   if (!dateString) return ''
   const date = new Date(dateString)
@@ -162,6 +170,36 @@ const handlePriceUpdated = (updatedCard) => {
           <span v-if="lastUpdateTime">Last update: {{ lastUpdateTime }}</span>
           <span v-else>No updates yet</span>
           <span>Quota resets at {{ formatResetTime(priceStatus.resets_at) }}</span>
+        </div>
+      </div>
+
+      <!-- Unmatched Cards Warning -->
+      <div v-if="showUnmatchedWarning" class="mt-4 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg p-4">
+        <div class="flex items-start gap-3">
+          <svg class="w-5 h-5 text-amber-500 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+          </svg>
+          <div class="flex-1">
+            <h4 class="text-sm font-medium text-amber-800 dark:text-amber-200">
+              {{ unmatchedCards.length }} card{{ unmatchedCards.length === 1 ? '' : 's' }} cannot receive price updates
+            </h4>
+            <p class="mt-1 text-xs text-amber-700 dark:text-amber-300">
+              These cards couldn't be matched in the pricing database. Their prices will not be updated automatically.
+            </p>
+            <details class="mt-2">
+              <summary class="text-xs text-amber-600 dark:text-amber-400 cursor-pointer hover:text-amber-800 dark:hover:text-amber-200">
+                Show affected cards
+              </summary>
+              <ul class="mt-2 space-y-1 text-xs text-amber-700 dark:text-amber-300">
+                <li v-for="card in unmatchedCards" :key="card.card_id" class="flex justify-between items-start gap-2 py-1 border-b border-amber-200/50 dark:border-amber-700/50 last:border-0">
+                  <span class="font-medium">{{ card.name }}</span>
+                  <span class="text-amber-600 dark:text-amber-400 text-right">
+                    {{ card.set_name }}{{ card.card_number ? ` #${card.card_number}` : '' }}
+                  </span>
+                </li>
+              </ul>
+            </details>
+          </div>
         </div>
       </div>
     </div>

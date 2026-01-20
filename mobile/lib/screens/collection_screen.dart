@@ -90,7 +90,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
               // Game filter
               Expanded(
                 child: DropdownButtonFormField<String?>(
-                  value: provider.gameFilter,
+                  initialValue: provider.gameFilter,
                   decoration: InputDecoration(
                     labelText: 'Game',
                     contentPadding: const EdgeInsets.symmetric(
@@ -114,7 +114,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
               // Sort option
               Expanded(
                 child: DropdownButtonFormField<SortOption>(
-                  value: provider.sortOption,
+                  initialValue: provider.sortOption,
                   decoration: InputDecoration(
                     labelText: 'Sort By',
                     contentPadding: const EdgeInsets.symmetric(
@@ -341,11 +341,11 @@ class _CollectionScreenState extends State<CollectionScreen> {
     try {
       final updated = await provider.refreshAllPrices();
       if (!mounted) return;
+      final message = updated > 0
+          ? 'Updated $updated card prices'
+          : 'No cards updated (quota may be exhausted)';
       messenger.showSnackBar(
-        SnackBar(
-          content: Text('Queued $updated cards for price refresh'),
-          behavior: SnackBarBehavior.floating,
-        ),
+        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
       );
     } catch (e) {
       if (!mounted) return;

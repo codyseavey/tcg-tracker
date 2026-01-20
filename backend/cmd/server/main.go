@@ -69,6 +69,9 @@ func main() {
 	// Initialize snapshot service for daily value tracking
 	snapshotService := services.NewSnapshotService()
 
+	// Initialize TCGPlayer sync service for bulk prepopulating TCGPlayerIDs
+	tcgPlayerSync := services.NewTCGPlayerSyncService(justTCGService)
+
 	// Create a cancellable context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -79,8 +82,23 @@ func main() {
 	// Start snapshot service in background
 	go snapshotService.Start(ctx)
 
+	// Optionally sync missing TCGPlayerIDs on startup (if enabled)
+	if os.Getenv("SYNC_TCGPLAYER_IDS_ON_STARTUP") == "true" {
+		go func() {
+			// Wait a bit for the server to be ready
+			time.Sleep(5 * time.Second)
+			log.Println("Starting TCGPlayerID sync on startup...")
+			result, err := tcgPlayerSync.SyncMissingTCGPlayerIDs(ctx)
+			if err != nil {
+				log.Printf("TCGPlayerID sync failed: %v", err)
+			} else if result != nil {
+				log.Printf("TCGPlayerID sync completed: %d cards updated", result.CardsUpdated)
+			}
+		}()
+	}
+
 	// Setup router
-	router := api.SetupRouter(scryfallService, pokemonService, priceWorker, priceService, imageStorageService, snapshotService)
+	router := api.SetupRouter(scryfallService, pokemonService, priceWorker, priceService, imageStorageService, snapshotService, tcgPlayerSync, justTCGService)
 
 	// Get port from environment
 	port := os.Getenv("PORT")

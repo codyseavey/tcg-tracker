@@ -7,10 +7,10 @@ import (
 )
 
 func TestNewJustTCGService(t *testing.T) {
-	// Test with default limit
+	// Test with default limit (paid tier)
 	svc := NewJustTCGService("test-key", 0)
-	if svc.dailyLimit != 100 {
-		t.Errorf("Expected default daily limit of 100, got %d", svc.dailyLimit)
+	if svc.dailyLimit != 1000 {
+		t.Errorf("Expected default daily limit of 1000, got %d", svc.dailyLimit)
 	}
 	if svc.apiKey != "test-key" {
 		t.Errorf("Expected API key 'test-key', got %s", svc.apiKey)
@@ -124,5 +124,77 @@ func TestExtractBaseName(t *testing.T) {
 				t.Errorf("extractBaseName(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestBatchLookupRouting(t *testing.T) {
+	// This test verifies that the batch lookup logic correctly identifies:
+	// - Cards with ScryfallID or TCGPlayerID -> can use batch POST
+	// - Cards without external IDs -> should be skipped (price worker syncs sets first)
+
+	lookups := []CardLookup{
+		// MTG card with Scryfall ID - should use batch POST
+		{CardID: "mtg-card-1", ScryfallID: "abc-123-def", Name: "Lightning Bolt", Game: "magic-the-gathering"},
+		{CardID: "mtg-card-2", ScryfallID: "xyz-456-ghi", Name: "Black Lotus", Game: "magic-the-gathering"},
+		// Pokemon card with cached TCGPlayerID - should use batch POST
+		{CardID: "swsh4-25", TCGPlayerID: "12345", Name: "Charizard", Game: "pokemon"},
+		// Pokemon card without external IDs - should be skipped
+		{CardID: "base1-4", Name: "Pikachu", Game: "pokemon"},
+	}
+
+	var batchable, skipped []CardLookup
+	for _, lookup := range lookups {
+		if lookup.ScryfallID != "" || lookup.TCGPlayerID != "" {
+			batchable = append(batchable, lookup)
+		} else {
+			skipped = append(skipped, lookup)
+		}
+	}
+
+	if len(batchable) != 3 {
+		t.Errorf("Expected 3 batchable cards (2 MTG + 1 Pokemon with cached ID), got %d", len(batchable))
+	}
+	if len(skipped) != 1 {
+		t.Errorf("Expected 1 skipped card (Pokemon without cached ID), got %d", len(skipped))
+	}
+
+	// Verify batchable cards have external IDs
+	for _, lookup := range batchable {
+		if lookup.ScryfallID == "" && lookup.TCGPlayerID == "" {
+			t.Errorf("Batchable card %s should have ScryfallID or TCGPlayerID", lookup.CardID)
+		}
+	}
+
+	// Verify skipped cards don't have external IDs
+	for _, lookup := range skipped {
+		if lookup.ScryfallID != "" || lookup.TCGPlayerID != "" {
+			t.Errorf("Skipped card %s should not have external IDs", lookup.CardID)
+		}
+	}
+}
+
+func TestBatchPriceResultStructure(t *testing.T) {
+	// Verify the BatchPriceResult struct properly holds prices and discovered IDs
+	result := &BatchPriceResult{
+		Prices:            make(map[string][]models.CardPrice),
+		DiscoveredTCGPIDs: make(map[string]string),
+	}
+
+	// Simulate adding prices
+	result.Prices["card-1"] = []models.CardPrice{
+		{Condition: models.PriceConditionNM, PriceUSD: 10.0},
+	}
+
+	// Simulate discovering a TCGPlayerID
+	result.DiscoveredTCGPIDs["card-1"] = "tcg-12345"
+
+	if len(result.Prices) != 1 {
+		t.Errorf("Expected 1 price entry, got %d", len(result.Prices))
+	}
+	if len(result.DiscoveredTCGPIDs) != 1 {
+		t.Errorf("Expected 1 discovered ID, got %d", len(result.DiscoveredTCGPIDs))
+	}
+	if result.DiscoveredTCGPIDs["card-1"] != "tcg-12345" {
+		t.Errorf("Expected discovered ID 'tcg-12345', got '%s'", result.DiscoveredTCGPIDs["card-1"])
 	}
 }

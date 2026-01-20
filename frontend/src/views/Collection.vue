@@ -193,10 +193,19 @@ const handleRefreshPrices = async () => {
   refreshMessage.value = null
   try {
     const result = await store.refreshPrices()
-    if (result.queued > 0) {
+    if (result.updated > 0) {
+      const remaining = result.queued - result.updated
+      const msg = remaining > 0
+        ? `Updated ${result.updated} cards. ${remaining} more queued for next batch.`
+        : `Updated ${result.updated} card prices.`
       refreshMessage.value = {
         type: 'success',
-        text: `Queued ${result.queued} cards for price update. Next batch in ~${Math.ceil((new Date(result.next_update_time) - new Date()) / 60000)} minutes.`
+        text: msg
+      }
+    } else if (result.queued > 0) {
+      refreshMessage.value = {
+        type: 'info',
+        text: `${result.queued} cards queued. API quota may be exhausted.`
       }
     } else {
       refreshMessage.value = {
