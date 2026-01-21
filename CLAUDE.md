@@ -159,7 +159,7 @@ Base URL: `http://localhost:8080/api`
 - `DELETE /collection/:id` - Remove from collection (🔒 requires admin key)
 - `GET /collection/stats` - Get collection statistics
 - `GET /collection/stats/history` - Get historical collection value snapshots (for charting)
-- `POST /collection/refresh-prices` - Immediately refresh prices for collection cards (up to 100 per batch) (🔒 requires admin key)
+- `POST /collection/refresh-prices` - Trigger immediate price update batch (up to 100 cards) (🔒 requires admin key)
 
 ### Prices
 - `GET /prices/status` - Get API quota status and next update time
@@ -247,8 +247,9 @@ The background price worker (`PriceWorker`) updates prices with priority orderin
 - Example: 100 Pokemon cards from 3 sets = ~9 set syncs + 1 batch = **~10 requests** (not 100)
 
 **Immediate Refresh:**
-- `POST /collection/refresh-prices` triggers an immediate batch update (doesn't wait for scheduled interval)
-- Useful for users who want prices updated right away after adding cards
+- `POST /collection/refresh-prices` triggers an immediate batch update (doesn't wait for 15-minute interval)
+- Updates up to 100 cards using the same priority logic as the background worker
+- If fewer than 100 cards are queued/need prices, fills batch with cards having oldest prices
 - Still respects rate limits and daily quota
 
 Worker skips updates when daily quota is exhausted (resets at midnight).

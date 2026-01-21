@@ -52,7 +52,7 @@ class _CollectionScreenState extends State<CollectionScreen> {
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _refreshPrices,
-            tooltip: 'Refresh Prices',
+            tooltip: 'Update Prices Now',
           ),
           IconButton(
             icon: const Icon(Icons.settings),

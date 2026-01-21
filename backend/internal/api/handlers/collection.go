@@ -470,43 +470,27 @@ func (h *CollectionHandler) GetStats(c *gin.Context) {
 	c.JSON(http.StatusOK, stats)
 }
 
-// RefreshPrices queues all collection cards for price refresh and immediately triggers
-// a batch update. Uses JustTCG as the sole price source for consistent, condition-based pricing.
-// With paid tier limits, this immediately fetches prices for up to 100 cards per batch.
+// RefreshPrices immediately triggers a price update batch without waiting for the
+// scheduled 15-minute interval. Updates up to 100 cards per batch, prioritizing:
+// 1. User-requested refreshes (from the urgent queue)
+// 2. Collection cards without prices
+// 3. Collection cards with oldest prices (to fill the batch to 100)
 func (h *CollectionHandler) RefreshPrices(c *gin.Context) {
 	if h.priceWorker == nil {
 		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "price worker not available"})
 		return
 	}
 
-	db := database.GetDB()
-
-	// Get unique card IDs from collection
-	var cardIDs []string
-	if err := db.Model(&models.CollectionItem{}).
-		Distinct("card_id").
-		Pluck("card_id", &cardIDs).Error; err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		return
-	}
-
-	// Queue all collection cards for refresh
-	queued := 0
-	for _, cardID := range cardIDs {
-		h.priceWorker.QueueRefresh(cardID)
-		queued++
-	}
-
-	// Immediately trigger a batch update (don't wait for scheduled interval)
+	// Trigger immediate batch update (uses existing priority logic to select cards)
 	updated, err := h.priceWorker.UpdateBatch()
 	if err != nil {
-		// Log error but don't fail the request - cards are still queued
-		log.Printf("RefreshPrices: immediate batch update failed: %v", err)
+		log.Printf("RefreshPrices: batch update failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "batch update failed: " + err.Error()})
+		return
 	}
 
 	status := h.priceWorker.GetStatus()
 	c.JSON(http.StatusOK, gin.H{
-		"queued":          queued,
 		"updated":         updated,
 		"queue_size":      status.QueueSize,
 		"daily_remaining": status.Remaining,

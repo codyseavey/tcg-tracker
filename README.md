@@ -170,7 +170,7 @@ Configure the server URL in settings to point to your backend IP.
 - `DELETE /api/collection/:id` - Remove from collection (🔒)
 - `GET /api/collection/stats` - Get collection statistics
 - `GET /api/collection/stats/history` - Get historical collection value snapshots (for charting)
-- `POST /api/collection/refresh-prices` - Immediately refresh prices for collection cards (🔒)
+- `POST /api/collection/refresh-prices` - Trigger immediate price update batch (up to 100 cards) (🔒)
 
 ### Prices
 - `GET /api/prices/status` - Get pricing quota status and next update time

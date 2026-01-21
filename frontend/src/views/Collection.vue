@@ -194,23 +194,16 @@ const handleRefreshPrices = async () => {
   try {
     const result = await store.refreshPrices()
     if (result.updated > 0) {
-      const remaining = result.queued - result.updated
-      const msg = remaining > 0
-        ? `Updated ${result.updated} cards. ${remaining} more queued for next batch.`
-        : `Updated ${result.updated} card prices.`
       refreshMessage.value = {
         type: 'success',
-        text: msg
-      }
-    } else if (result.queued > 0) {
-      refreshMessage.value = {
-        type: 'info',
-        text: `${result.queued} cards queued. API quota may be exhausted.`
+        text: `Updated ${result.updated} card prices.`
       }
     } else {
       refreshMessage.value = {
         type: 'info',
-        text: 'No cards to refresh.'
+        text: result.daily_remaining === 0
+          ? 'API quota exhausted. Resets at midnight.'
+          : 'No cards needed price updates.'
       }
     }
     // Auto-hide message after 5 seconds
@@ -218,7 +211,7 @@ const handleRefreshPrices = async () => {
   } catch (err) {
     refreshMessage.value = {
       type: 'error',
-      text: err.message || 'Failed to queue price refresh'
+      text: err.message || 'Failed to update prices'
     }
   } finally {
     refreshing.value = false
@@ -341,7 +334,7 @@ onMounted(() => {
             class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
             <span v-if="refreshing" class="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span>
-            {{ refreshing ? 'Queueing...' : 'Refresh Prices' }}
+            {{ refreshing ? 'Updating...' : 'Update Prices Now' }}
           </button>
         </div>
       </div>
