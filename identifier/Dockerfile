@@ -17,9 +17,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 
 # Install Python dependencies
-# Note: For GPU support, override torch installation in docker-compose
+# Use CUDA 11.8 PyTorch for broader GPU support (Pascal/GTX 1080 Ti and newer)
 RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir torch torchvision
+    && pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu118
 
 # Copy application code
 COPY . .
