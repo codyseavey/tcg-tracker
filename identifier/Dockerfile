@@ -16,10 +16,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy requirements first for better layer caching
 COPY requirements.txt .
 
-# Install Python dependencies
-# Use CUDA 11.8 PyTorch for broader GPU support (Pascal/GTX 1080 Ti and newer)
-RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu118
+# Install Python dependencies first (without torch - managed separately)
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install PyTorch with CUDA 11.8 for Pascal GPU support (GTX 1080 Ti, compute 6.1)
+# Separate layer to ensure correct CUDA version is used
+RUN pip install --no-cache-dir torch==2.5.1+cu118 torchvision==0.20.1+cu118 --index-url https://download.pytorch.org/whl/cu118
 
 # Copy application code
 COPY . .
