@@ -96,17 +96,24 @@ func migratePrintingField(db *gorm.DB) error {
 
 		// Migrate card_prices: Foil=true -> Printing='Foil', Foil=false -> Printing='Normal'
 		result := db.Exec(`
-			UPDATE card_prices 
-			SET printing = CASE 
-				WHEN foil = 1 THEN 'Foil' 
-				ELSE 'Normal' 
-			END 
+			UPDATE card_prices
+			SET printing = CASE
+				WHEN foil = 1 THEN 'Foil'
+				ELSE 'Normal'
+			END
 			WHERE printing IS NULL OR printing = ''
 		`)
 		if result.Error != nil {
 			log.Printf("Warning: failed to migrate card_prices foil column: %v", result.Error)
 		} else {
 			log.Printf("Migrated %d card_prices rows", result.RowsAffected)
+		}
+
+		// Drop the legacy foil column (SQLite 3.35.0+ supports DROP COLUMN)
+		if err := db.Migrator().DropColumn("card_prices", "foil"); err != nil {
+			log.Printf("Warning: failed to drop card_prices.foil column: %v", err)
+		} else {
+			log.Println("Dropped legacy card_prices.foil column")
 		}
 	}
 
@@ -117,18 +124,34 @@ func migratePrintingField(db *gorm.DB) error {
 
 		// Migrate collection_items: FirstEdition takes priority, then Foil, then Normal
 		result := db.Exec(`
-			UPDATE collection_items 
-			SET printing = CASE 
+			UPDATE collection_items
+			SET printing = CASE
 				WHEN first_edition = 1 THEN '1st Edition'
-				WHEN foil = 1 THEN 'Foil' 
-				ELSE 'Normal' 
-			END 
+				WHEN foil = 1 THEN 'Foil'
+				ELSE 'Normal'
+			END
 			WHERE printing IS NULL OR printing = ''
 		`)
 		if result.Error != nil {
 			log.Printf("Warning: failed to migrate collection_items columns: %v", result.Error)
 		} else {
 			log.Printf("Migrated %d collection_items rows", result.RowsAffected)
+		}
+
+		// Drop the legacy columns (SQLite 3.35.0+ supports DROP COLUMN)
+		if db.Migrator().HasColumn("collection_items", "foil") {
+			if err := db.Migrator().DropColumn("collection_items", "foil"); err != nil {
+				log.Printf("Warning: failed to drop collection_items.foil column: %v", err)
+			} else {
+				log.Println("Dropped legacy collection_items.foil column")
+			}
+		}
+		if db.Migrator().HasColumn("collection_items", "first_edition") {
+			if err := db.Migrator().DropColumn("collection_items", "first_edition"); err != nil {
+				log.Printf("Warning: failed to drop collection_items.first_edition column: %v", err)
+			} else {
+				log.Println("Dropped legacy collection_items.first_edition column")
+			}
 		}
 	}
 
