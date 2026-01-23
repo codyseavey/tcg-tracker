@@ -112,6 +112,8 @@ Environment variables:
 - `JUSTTCG_API_KEY` - JustTCG API key for condition-based pricing
 - `JUSTTCG_DAILY_LIMIT` - Daily API request limit (default: 1000)
 - `SYNC_TCGPLAYER_IDS_ON_STARTUP` - Set to "true" to sync missing Pokemon TCGPlayerIDs on startup
+- `GOOGLE_APPLICATION_CREDENTIALS` - Path to Google Cloud service account JSON (enables translation API)
+- `TRANSLATION_CONFIDENCE_THRESHOLD` - Score below which triggers translation API (default: 800)
 
 #### 2. Frontend (Vue.js Web App)
 
@@ -240,6 +242,10 @@ The system uses a two-tier OCR approach for card identification:
 - Client-side OCR is configured for Latin script only
 - Japanese cards with English names (e.g., "ピカチュウ Pikachu") can match by English text
 - Japanese-only cards rely on set code + card number matching
+- **Hybrid Translation**: For low-confidence matches, Japanese text is translated using:
+  1. Static map (1025 Pokemon + common trainer cards)
+  2. SQLite cache (avoids repeat API calls)
+  3. Google Cloud Translation API (if credentials configured)
 
 ## External APIs
 
@@ -266,6 +272,9 @@ The backend exposes Prometheus metrics at `/metrics` for monitoring:
 - `tcg_justtcg_quota_remaining` - API quota remaining
 - `tcg_http_requests_total` - HTTP request counter by path/method/status
 - `tcg_http_request_duration_seconds` - Request latency histogram
+- `tcg_translation_requests_total` - Translation requests by source (static/cache/api)
+- `tcg_translation_cache_hits_total` - Translation cache hit count
+- `tcg_translation_api_latency_seconds` - Google Cloud Translation API latency
 
 ### Grafana Dashboard
 Import the pre-built dashboard from `monitoring/grafana-dashboard.json` to visualize:

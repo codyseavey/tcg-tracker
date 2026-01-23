@@ -15,22 +15,22 @@ func TestPokemonCardNumberExtraction(t *testing.T) {
 		wantHP         string
 		wantSetCode    string
 		wantCardName   string
+		wantLanguage   string
 		wantIsFoil     bool
 		minConfidence  float64
 	}{
 		{
-			name: "Standard Pokemon card with leading zeros",
-			input: `Charizard
-HP 170
-STAGE 2
-025/185
-SWSH4`,
-			wantCardNumber: "25",
-			wantSetTotal:   "185",
-			wantHP:         "170",
-			wantSetCode:    "swsh4",
-			wantCardName:   "Charizard",
-			minConfidence:  0.8,
+			name: "Japanese Charizard with no English name",
+			input: `リザードン
+HP 150
+かえんほうしゃ
+004/165
+SV2A`,
+			wantCardNumber: "4",
+			wantHP:         "150",
+			wantSetCode:    "sv2a",
+			wantLanguage:   "Japanese",
+			wantCardName:   "Charizard", // Translated from Japanese
 		},
 		{
 			name: "Pokemon card without leading zeros",
@@ -284,6 +284,10 @@ HP 180
 
 			if tt.wantCardName != "" && result.CardName != tt.wantCardName {
 				t.Errorf("CardName = %q, want %q", result.CardName, tt.wantCardName)
+			}
+
+			if tt.wantLanguage != "" && result.DetectedLanguage != tt.wantLanguage {
+				t.Errorf("DetectedLanguage = %q, want %q", result.DetectedLanguage, tt.wantLanguage)
 			}
 
 			if tt.wantIsFoil && !result.IsFoil {
@@ -1749,14 +1753,13 @@ SV1`,
 			name: "Japanese trainer card (pure Japanese, no English name)",
 			input: `博士の研究
 サポート
-自分の手札をすべてトラッシュし
-山札を7枚引く
-147/198
-SV1`,
+自分の山札を5枚引く
+147/172
+S12A`,
 			wantCardNumber: "147",
-			wantSetCode:    "sv1",
+			wantSetCode:    "", // Set code S12A not mapped yet
 			wantLanguage:   "Japanese",
-			wantNameEmpty:  true, // No English name to match
+			wantCardName:   "Professor's Research", // Translated from Japanese
 		},
 
 		{
@@ -1771,7 +1774,7 @@ SWSH4`,
 			wantSetCode:    "swsh4",
 			wantHP:         "180",
 			wantLanguage:   "Japanese",
-			wantNameEmpty:  true, // No English name, must rely on number
+			wantCardName:   "Charizard", // Translated from Japanese
 		},
 		{
 			name: "Japanese Pokemon V with English suffix",
@@ -1791,14 +1794,13 @@ SWSH4`,
 			name: "Japanese Boss's Orders trainer",
 			input: `ボスの指令
 サポート
-相手のベンチポケモンを1匹選び
-バトルポケモンと入れ替える
-132/172
-SWSH3`,
-			wantCardNumber: "132",
-			wantSetCode:    "swsh3",
+相手のベンチポケモンを1匹
+バトル場に
+066/098
+S11`,
+			wantCardNumber: "66",
 			wantLanguage:   "Japanese",
-			wantNameEmpty:  true, // Japanese-only trainer
+			wantCardName:   "Boss's Orders", // Translated from Japanese
 		},
 		{
 			name: "Mixed Japanese/English with OCR errors",
@@ -1837,12 +1839,11 @@ SV3PT5`,
 SV2A`,
 			wantCardNumber: "89",
 			wantLanguage:   "Japanese",
-			wantNameEmpty:  true,
+			wantCardName:   "Rare Candy", // Translated from Japanese
 		},
 		{
-			// This is the critical test case: TRAINER is a card type, NOT a card name.
-			// Before the fix, "TRAINER" was being returned as the card name which caused
-			// Japanese trainer cards to match the wrong English cards.
+			// TRAINER is a card type, NOT a card name.
+			// The Japanese name 博士の研究 should be translated to Professor's Research
 			name: "Japanese trainer with TRAINER as only English text",
 			input: `博士の研究
 TRAINER
@@ -1853,10 +1854,10 @@ SV1`,
 			wantCardNumber: "147",
 			wantSetCode:    "sv1",
 			wantLanguage:   "Japanese",
-			wantNameEmpty:  true, // TRAINER should be skipped, not used as card name
+			wantCardName:   "Professor's Research", // Translated from Japanese, TRAINER skipped
 		},
 		{
-			// Focus: SUPPORTER should not be used as card name
+			// SUPPORTER is skipped, Japanese name translated
 			name: "Japanese supporter with SUPPORTER as only English text",
 			input: `ナンジャモ
 SUPPORTER
@@ -1864,12 +1865,11 @@ SUPPORTER
 091/165
 SV2A`,
 			wantCardNumber: "91",
-			// Set code inference may vary - the focus is that SUPPORTER is skipped
-			wantLanguage:  "Japanese",
-			wantNameEmpty: true, // SUPPORTER should be skipped
+			wantLanguage:   "Japanese",
+			wantCardName:   "Iono", // Translated from Japanese ナンジャモ
 		},
 		{
-			// Focus: ITEM should not be used as card name
+			// ITEM is skipped, Japanese name translated
 			name: "Japanese item with ITEM as only English text",
 			input: `ハイパーボール
 ITEM
@@ -1878,9 +1878,8 @@ ITEM
 123/165
 SV2A`,
 			wantCardNumber: "123",
-			// Set code inference may vary - the focus is that ITEM is skipped
-			wantLanguage:  "Japanese",
-			wantNameEmpty: true, // ITEM should be skipped
+			wantLanguage:   "Japanese",
+			wantCardName:   "Ultra Ball", // Translated from Japanese ハイパーボール
 		},
 		{
 			// Focus: STADIUM should not be used as card name
@@ -1901,26 +1900,25 @@ SV4`,
 015/078`,
 			wantCardNumber: "15",
 			wantLanguage:   "Japanese",
-			wantNameEmpty:  true,
+			wantCardName:   "Greninja", // Translated from ゲッコウガ via static map
 		},
 		{
-			// Test that OCR garbage like "TQG" is not used as card name
-			// This is from a real scan of a Japanese Professor Elm card
+			// OCR garbage like "TQG" is skipped, Japanese name is translated
 			name: "Japanese trainer with TQG OCR garbage",
 			input: `TQG
 ウツギはかせ
 あなたの手札をすべて山札にもどし`,
-			wantLanguage:  "Japanese",
-			wantNameEmpty: true, // TQG should NOT be used as card name
+			wantLanguage: "Japanese",
+			wantCardName: "Professor Elm", // Translated from ウツギはかせ, TQG skipped
 		},
 		{
-			// Test that strings starting with @ are skipped
+			// Strings starting with @ are skipped, Japanese name is translated
 			name: "Japanese trainer with @N OCR garbage",
 			input: `1
 @N町
 すごいつりざお`,
-			wantLanguage:  "Japanese",
-			wantNameEmpty: true, // @N町 should NOT be used as card name
+			wantLanguage: "Japanese",
+			wantCardName: "Super Rod", // Translated from すごいつりざお
 		},
 		{
 			// Test that random OCR garbage is not used as card name

@@ -198,6 +198,7 @@ type CardSearchResult struct {
 	Cards      []Card `json:"cards"`
 	TotalCount int    `json:"total_count"`
 	HasMore    bool   `json:"has_more"`
+	TopScore   int    `json:"-"` // Best match score (internal, for translation fallback)
 }
 
 // MTGSetGroup represents a set containing variants of a scanned card

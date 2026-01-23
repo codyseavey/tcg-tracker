@@ -3,6 +3,10 @@
 .env.local
 .env.*.local
 
+# Secrets (Google Cloud credentials, API keys, etc.)
+secrets/
+*.json.enc
+
 # Database
 *.sqlite
 *.sqlite3
@@ -56,6 +60,11 @@ backend/data/pokemon-tcg-data.zip
 
 # Test images (downloaded during testing)
 backend/internal/services/testdata/images/
+
+# Local OCR dumps / manual test images
+/*.jpeg
+/*.jpg
+/*.png
 
 # Python
 __pycache__/

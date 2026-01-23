@@ -31,6 +31,7 @@ type OCRResult struct {
 	AllLines           []string           `json:"all_lines"`
 	ConditionHints     []string           `json:"condition_hints"` // hints about card condition
 	CandidateSets      []string           `json:"candidate_sets"`  // possible sets when ambiguous (from set total)
+	TextMatches        []string           `json:"text_matches"`    // matched fields from full-text search
 	RawText            string             `json:"raw_text"`
 	CardName           string             `json:"card_name"`
 	CardNumber         string             `json:"card_number"`          // e.g., "25" from "025/185"
@@ -42,6 +43,8 @@ type OCRResult struct {
 	Rarity             string             `json:"rarity"`               // if detected
 	MatchReason        string             `json:"match_reason"`         // how set was determined: "set_code", "set_name", "set_total", "inferred"
 	DetectedLanguage   string             `json:"detected_language"`    // e.g., "English", "Japanese", "German", etc.
+	PokedexNumber      int                `json:"pokedex_number"`       // National Pokedex number for vintage Japanese cards (e.g., 32 for Nidoran)
+	TranslationSource  string             `json:"translation_source"`   // "static" | "api" when translation improves matching
 	Confidence         float64            `json:"confidence"`           // 0-1 based on how much we extracted
 	IsFoil             bool               `json:"is_foil"`              // detected foil indicators (conservative)
 	IsFirstEdition     bool               `json:"is_first_edition"`     // detected first edition
@@ -831,6 +834,16 @@ func parsePokemonOCR(result *OCRResult) {
 		// Don't set SetTotal for SV format as it's a subset total, not the main set
 	}
 
+	// Extract National Pokedex number from vintage Japanese cards
+	// Format: "No. XXX" or "No.XXX" (e.g., "No. 032" for Nidoran)
+	// OCR often misreads "No" as "Na", "Nc", "N0", etc. so we allow N[aoce0]
+	pokedexRegex := regexp.MustCompile(`(?i)N[aoce0]\.?\s*(\d{1,3})`)
+	if matches := pokedexRegex.FindStringSubmatch(text); len(matches) >= 2 {
+		if num := parseInt(matches[1]); num > 0 && num <= 1025 { // Valid Pokedex range
+			result.PokedexNumber = num
+		}
+	}
+
 	// Extract HP using two tiers of patterns:
 	// Tier 1: Explicit HP patterns (with "HP" text) - most reliable
 	// Tier 2: Fallback patterns (modern cards without HP text)
@@ -899,7 +912,8 @@ func parsePokemonOCR(result *OCRResult) {
 		// Card has Shiny Vault number - don't match SV as set code
 		setCodeRegex = regexp.MustCompile(`\b(SWSH\d{1,2}|XY\d{1,2}|SM\d{1,2}(?:PT5)?|BW\d{1,2}|DP\d{1,2}|EX\d{1,2}|PGO|CEL25|PR-SW|PR-SV)\b`)
 	} else {
-		setCodeRegex = regexp.MustCompile(`\b(SWSH\d{1,2}|SV\d{1,2}(?:PT5)?|XY\d{1,2}|SM\d{1,2}(?:PT5)?|BW\d{1,2}|DP\d{1,2}|EX\d{1,2}|PGO|CEL25|PR-SW|PR-SV)\b`)
+		// SV sets: SV1, SV2, SV2A (Pokemon 151 JP), SV3PT5 etc.
+		setCodeRegex = regexp.MustCompile(`\b(SWSH\d{1,2}|SV\d[A-Z0-9]*(?:PT5)?|XY\d{1,2}|SM\d{1,2}(?:PT5)?|BW\d{1,2}|DP\d{1,2}|EX\d{1,2}|PGO|CEL25|PR-SW|PR-SV)\b`)
 	}
 	if matches := setCodeRegex.FindStringSubmatch(upperText); len(matches) >= 1 {
 		result.SetCode = strings.ToLower(matches[0])
@@ -939,11 +953,24 @@ func parsePokemonOCR(result *OCRResult) {
 	// Detect condition hints (grading labels, damage indicators)
 	detectConditionHints(result, upperText)
 
+	// Detect language from OCR text (Japanese, German, French, Italian, or English)
+	// Do this before card name extraction so we can use it for Japanese translation
+	result.DetectedLanguage = detectLanguage(text)
+
 	// Extract card name - usually first substantial line or after HP
 	result.CardName = extractPokemonCardName(result.AllLines, result.Rarity)
 
-	// Detect language from OCR text (Japanese, German, French, Italian, or English)
-	result.DetectedLanguage = detectLanguage(text)
+	// For Japanese cards, try to translate Japanese names to English
+	if result.DetectedLanguage == "Japanese" && result.CardName == "" {
+		// Try to find and translate Japanese card names from OCR text
+		for _, line := range result.AllLines {
+			line = strings.TrimSpace(line)
+			if englishName, found := TranslateJapaneseName(line); found {
+				result.CardName = englishName
+				break
+			}
+		}
+	}
 }
 
 // detectFoilIndicators checks for foil/holographic card indicators

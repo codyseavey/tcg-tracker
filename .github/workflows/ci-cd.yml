@@ -362,6 +362,9 @@ jobs:
       - name: Ensure data directories exist
         run: |
           ssh $SERVER "mkdir -p $APP_DIR/data/pokemon-tcg-data"
+          # Create secrets directory and link Google Cloud credentials for translation API
+          ssh $SERVER "mkdir -p $APP_DIR/secrets"
+          ssh $SERVER "ln -sf /home/cody/google-cloud-adminSvc.json $APP_DIR/secrets/gcloud.json"
 
       - name: Save IMAGE_TAG for systemd service
         run: |

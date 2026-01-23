@@ -72,6 +72,9 @@ func main() {
 	// Initialize TCGPlayer sync service for bulk prepopulating TCGPlayerIDs
 	tcgPlayerSync := services.NewTCGPlayerSyncService(justTCGService)
 
+	// Initialize hybrid translation service for Japanese card support
+	translationService := services.NewHybridTranslationService(database.GetDB())
+
 	// Create a cancellable context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -116,7 +119,7 @@ func main() {
 	}
 
 	// Setup router
-	router := api.SetupRouter(scryfallService, pokemonService, priceWorker, priceService, imageStorageService, snapshotService, tcgPlayerSync, justTCGService)
+	router := api.SetupRouter(scryfallService, pokemonService, priceWorker, priceService, imageStorageService, snapshotService, tcgPlayerSync, justTCGService, translationService)
 
 	// Get port from environment
 	port := os.Getenv("PORT")

@@ -133,4 +133,43 @@ var (
 			Buckets: []float64{0.1, 0.5, 1, 2, 5, 10},
 		},
 	)
+
+	// Translation Metrics
+	TranslationRequestsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "tcg_translation_requests_total",
+			Help: "Total translation requests by source",
+		},
+		[]string{"source"}, // "static", "cache", "api"
+	)
+
+	TranslationAPILatency = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "tcg_translation_api_latency_seconds",
+			Help:    "Google Cloud Translation API call latency",
+			Buckets: []float64{0.1, 0.25, 0.5, 1, 2, 5},
+		},
+	)
+
+	TranslationCacheHits = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "tcg_translation_cache_hits_total",
+			Help: "Translation cache hit count",
+		},
+	)
+
+	TranslationCacheMisses = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "tcg_translation_cache_misses_total",
+			Help: "Translation cache miss count",
+		},
+	)
+
+	TranslationErrorsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "tcg_translation_errors_total",
+			Help: "Translation errors by type",
+		},
+		[]string{"type"}, // "auth", "api", "cache"
+	)
 )

@@ -67,6 +67,8 @@ Environment variables (see `backend/.env.example`):
 - `JUSTTCG_DAILY_LIMIT` - Daily API request limit (default: 1000)
 - `ADMIN_KEY` - Admin key for collection modification (optional, disables auth if not set)
 - `SYNC_TCGPLAYER_IDS_ON_STARTUP` - Set to "true" to auto-sync TCGPlayerIDs on startup
+- `GOOGLE_APPLICATION_CREDENTIALS` - Path to Google Cloud service account JSON (enables translation API)
+- `TRANSLATION_CONFIDENCE_THRESHOLD` - Score below which triggers translation API (default: 800)
 
 ### Frontend
 ```bash
@@ -119,6 +121,9 @@ Environment variables:
 | `SnapshotService` | `internal/services/snapshot_service.go` | Daily collection value snapshots for historical tracking |
 | `ImageStorageService` | `internal/services/image_storage.go` | Store and retrieve scanned card images |
 | `TCGPlayerSyncService` | `internal/services/tcgplayer_sync.go` | Bulk sync TCGPlayerIDs from JustTCG for Pokemon cards |
+| `HybridTranslationService` | `internal/services/hybrid_translation.go` | Japanese card name translation (static map + cache + Google API) |
+| `TranslationCacheService` | `internal/services/translation_cache.go` | SQLite cache for translation API results |
+| `TranslationService` | `internal/services/translation_service.go` | Google Cloud Translation API v3 client |
 
 ### Identifier Service (Python)
 
@@ -277,6 +282,15 @@ Japanese cards require special processing since the Pokemon database is English-
 - **English word extraction**: Extracts English text from mixed Japanese/English lines (e.g., "ピカチュウV" → "V")
 - **Skip patterns**: Filters Japanese trainer card types (サポート, グッズ, スタジアム) and common text
 - **Fallback to card number**: Japanese-only cards (no English name) rely on set code + card number matching
+
+**Hybrid Translation (for low-confidence matches):**
+When card matching confidence is below `TRANSLATION_CONFIDENCE_THRESHOLD` (default: 800):
+1. **Static translation**: 1025 Pokemon + common trainer cards translated instantly via `JapaneseToEnglishNames` map
+2. **Cache check**: Translations cached in SQLite (`translation_caches` table) to avoid repeat API calls
+3. **Google Cloud Translation API**: If cache miss, calls API and caches result
+4. **Re-match**: Translated text is matched against English database
+
+Scoring reference: name_exact=1000, name_partial=500, attack=200, number=300
 
 **Important**: Japanese card scanning requires server-side OCR with `OCR_LANGUAGES=ja,en`. Client-side ML Kit is configured for Latin script only; the mobile app shows a warning when using fallback OCR for Pokemon cards.
 

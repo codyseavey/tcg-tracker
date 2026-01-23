@@ -28,6 +28,10 @@ services:
       - JUSTTCG_DAILY_LIMIT=${JUSTTCG_DAILY_LIMIT:-1000}
       - ADMIN_KEY=${ADMIN_KEY:-}
       - SYNC_TCGPLAYER_IDS_ON_STARTUP=${SYNC_TCGPLAYER_IDS_ON_STARTUP:-true}
+      # Google Cloud Translation API (for Japanese card support)
+      # Set GOOGLE_APPLICATION_CREDENTIALS=/app/secrets/gcloud.json if credentials file is mounted
+      - GOOGLE_APPLICATION_CREDENTIALS=${GOOGLE_APPLICATION_CREDENTIALS:-}
+      - TRANSLATION_CONFIDENCE_THRESHOLD=${TRANSLATION_CONFIDENCE_THRESHOLD:-800}
     depends_on:
       - identifier
     volumes:

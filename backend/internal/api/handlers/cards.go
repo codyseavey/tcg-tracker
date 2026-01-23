@@ -14,16 +14,18 @@ import (
 )
 
 type CardHandler struct {
-	scryfallService  *services.ScryfallService
-	pokemonService   *services.PokemonHybridService
-	serverOCRService *services.ServerOCRService
+	scryfallService    *services.ScryfallService
+	pokemonService     *services.PokemonHybridService
+	serverOCRService   *services.ServerOCRService
+	translationService *services.HybridTranslationService
 }
 
-func NewCardHandler(scryfall *services.ScryfallService, pokemon *services.PokemonHybridService) *CardHandler {
+func NewCardHandler(scryfall *services.ScryfallService, pokemon *services.PokemonHybridService, translation *services.HybridTranslationService) *CardHandler {
 	return &CardHandler{
-		scryfallService:  scryfall,
-		pokemonService:   pokemon,
-		serverOCRService: services.NewServerOCRService(),
+		scryfallService:    scryfall,
+		pokemonService:     pokemon,
+		serverOCRService:   services.NewServerOCRService(),
+		translationService: translation,
 	}
 }
 
@@ -186,6 +188,7 @@ func (h *CardHandler) IdentifyCard(c *gin.Context) {
 			"match_reason":         parsed.MatchReason,
 			"candidate_sets":       parsed.CandidateSets,
 			"detected_language":    parsed.DetectedLanguage,
+			"translation_source":   parsed.TranslationSource,
 			"text_matches":         textMatches,
 		},
 	}
@@ -321,6 +324,7 @@ func (h *CardHandler) IdentifyCardFromImage(c *gin.Context) {
 			"match_reason":         parsed.MatchReason,
 			"candidate_sets":       parsed.CandidateSets,
 			"detected_language":    parsed.DetectedLanguage,
+			"translation_source":   parsed.TranslationSource,
 			"text_matches":         textMatches,
 		},
 	}
@@ -386,6 +390,12 @@ func (h *CardHandler) searchAndMatchCards(c *gin.Context, parsed *services.OCRRe
 			}
 		}
 
+		// Priority 2.5: For vintage Japanese cards with Pokedex number but no card name/set,
+		// search by National Pokedex number to find matching Pokemon
+		if result == nil && parsed.PokedexNumber > 0 && parsed.CardName == "" {
+			result = h.pokemonService.SearchByPokedexNumber(parsed.PokedexNumber)
+		}
+
 		// Priority 3: Use full-text matching when we have substantial OCR text
 		// This matches against card name, attacks, abilities, and flavor text
 		if result == nil && len(fallbackText) >= 20 {
@@ -439,6 +449,55 @@ func (h *CardHandler) searchAndMatchCards(c *gin.Context, parsed *services.OCRRe
 				}
 				if !alreadyInResults {
 					result.Cards = append([]models.Card{*exactCard}, result.Cards...)
+				}
+			}
+		}
+
+		// Priority 7: Translation fallback for Japanese cards with low confidence full-text matches.
+		// IMPORTANT: Only trigger translation when full-text matching ran and produced a low score.
+		// Other matching paths (exact set+number, name-based search) do not provide a comparable score.
+		if h.translationService != nil && parsed.DetectedLanguage == "Japanese" && result != nil && result.TopScore > 0 && result.TopScore < h.translationService.GetConfidenceThreshold() {
+			translatedText, usedAPI, _ := h.translationService.TranslateForMatching(
+				c.Request.Context(),
+				fallbackText,
+				parsed.DetectedLanguage,
+				result.TopScore,
+			)
+
+			// If translation was performed (API or static map changed the text), retry matching
+			if translatedText != fallbackText {
+				translatedParsed := services.ParseOCRText(translatedText, game)
+
+				// Try full-text matching with translated text
+				if len(translatedText) >= 20 {
+					translatedResult, translatedMatches := h.pokemonService.MatchByFullText(
+						translatedText,
+						parsed.CandidateSets, // Keep original set hints
+					)
+
+					// Use translated result if it's better than current
+					if translatedResult != nil && len(translatedResult.Cards) > 0 && translatedResult.TopScore > result.TopScore {
+						result = translatedResult
+						textMatches = translatedMatches
+						if usedAPI {
+							parsed.TranslationSource = "api"
+						} else {
+							parsed.TranslationSource = "static"
+						}
+					}
+				}
+
+				// Name-based search on translated name only if we still have nothing
+				if (result == nil || len(result.Cards) == 0) && translatedParsed.CardName != "" {
+					nameResult, _ := h.pokemonService.SearchCards(translatedParsed.CardName)
+					if nameResult != nil && len(nameResult.Cards) > 0 {
+						result = nameResult
+						if usedAPI {
+							parsed.TranslationSource = "api"
+						} else {
+							parsed.TranslationSource = "static"
+						}
+					}
 				}
 			}
 		}

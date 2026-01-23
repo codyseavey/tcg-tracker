@@ -44,21 +44,22 @@ type LocalAbility struct {
 }
 
 type LocalPokemonCard struct {
-	Subtypes    []string        `json:"subtypes"`
-	Types       []string        `json:"types"`
-	Images      LocalCardImages `json:"images"`
-	Attacks     []LocalAttack   `json:"attacks"`
-	Abilities   []LocalAbility  `json:"abilities"`
-	ID          string          `json:"id"`
-	Name        string          `json:"name"`
-	Supertype   string          `json:"supertype"`
-	HP          string          `json:"hp"`
-	Number      string          `json:"number"`
-	Artist      string          `json:"artist"`
-	Rarity      string          `json:"rarity"`
-	FlavorText  string          `json:"flavorText"`
-	EvolvesFrom string          `json:"evolvesFrom"`
-	SetID       string          // Populated from filename
+	Subtypes               []string        `json:"subtypes"`
+	Types                  []string        `json:"types"`
+	Images                 LocalCardImages `json:"images"`
+	Attacks                []LocalAttack   `json:"attacks"`
+	Abilities              []LocalAbility  `json:"abilities"`
+	NationalPokedexNumbers []int           `json:"nationalPokedexNumbers"`
+	ID                     string          `json:"id"`
+	Name                   string          `json:"name"`
+	Supertype              string          `json:"supertype"`
+	HP                     string          `json:"hp"`
+	Number                 string          `json:"number"`
+	Artist                 string          `json:"artist"`
+	Rarity                 string          `json:"rarity"`
+	FlavorText             string          `json:"flavorText"`
+	EvolvesFrom            string          `json:"evolvesFrom"`
+	SetID                  string          // Populated from filename
 
 	// Pre-computed searchable text (built at load time)
 	searchableText string
@@ -515,6 +516,45 @@ func (s *PokemonHybridService) GetCardBySetAndNumber(setCode, cardNumber string)
 	return nil
 }
 
+// SearchByPokedexNumber finds Pokemon cards by their National Pokedex number
+// Returns all cards with that Pokedex number, sorted by release date (newest first)
+func (s *PokemonHybridService) SearchByPokedexNumber(pokedexNum int) *models.CardSearchResult {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if pokedexNum <= 0 {
+		return &models.CardSearchResult{Cards: []models.Card{}}
+	}
+
+	var matches []models.Card
+	for _, localCard := range s.cards {
+		// Only Pokemon cards have Pokedex numbers
+		if localCard.Supertype != "Pokémon" {
+			continue
+		}
+
+		for _, num := range localCard.NationalPokedexNumbers {
+			if num == pokedexNum {
+				matches = append(matches, s.convertToCard(localCard))
+				break
+			}
+		}
+	}
+
+	// Sort by set release date (newest first) for better UX
+	sort.Slice(matches, func(i, j int) bool {
+		setI := s.sets[strings.ToLower(matches[i].SetCode)]
+		setJ := s.sets[strings.ToLower(matches[j].SetCode)]
+		return setI.ReleaseDate > setJ.ReleaseDate
+	})
+
+	return &models.CardSearchResult{
+		Cards:      matches,
+		TotalCount: len(matches),
+		HasMore:    false,
+	}
+}
+
 // SearchByNameAndNumber searches for cards matching name and number across candidate sets
 // Returns cards ranked by match quality (exact matches first, then partial matches)
 // If candidateSets is empty, searches all sets
@@ -859,10 +899,17 @@ func (s *PokemonHybridService) MatchByFullText(ocrText string, candidateSets []s
 	// Load cached prices
 	s.loadCachedPrices(cards)
 
+	// Get top score for translation fallback decision
+	topScore := 0
+	if len(scored) > 0 {
+		topScore = scored[0].score
+	}
+
 	return &models.CardSearchResult{
 		Cards:      cards,
 		TotalCount: len(scored),
 		HasMore:    len(scored) > maxResults,
+		TopScore:   topScore,
 	}, topMatchedFields
 }
 
