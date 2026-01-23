@@ -109,8 +109,10 @@ func migratePrintingField(db *gorm.DB) error {
 			log.Printf("Migrated %d card_prices rows", result.RowsAffected)
 		}
 
-		// Drop the legacy foil column (SQLite 3.35.0+ supports DROP COLUMN)
-		if err := db.Migrator().DropColumn("card_prices", "foil"); err != nil {
+		// Drop the legacy foil column by recreating the table without it.
+		// SQLite's native DROP COLUMN (3.35+) doesn't work well with GORM,
+		// so we recreate the table to remove the NOT NULL constraint that blocks inserts.
+		if err := dropFoilColumnSafely(db); err != nil {
 			log.Printf("Warning: failed to drop card_prices.foil column: %v", err)
 		} else {
 			log.Println("Dropped legacy card_prices.foil column")
@@ -138,21 +140,8 @@ func migratePrintingField(db *gorm.DB) error {
 			log.Printf("Migrated %d collection_items rows", result.RowsAffected)
 		}
 
-		// Drop the legacy columns (SQLite 3.35.0+ supports DROP COLUMN)
-		if db.Migrator().HasColumn("collection_items", "foil") {
-			if err := db.Migrator().DropColumn("collection_items", "foil"); err != nil {
-				log.Printf("Warning: failed to drop collection_items.foil column: %v", err)
-			} else {
-				log.Println("Dropped legacy collection_items.foil column")
-			}
-		}
-		if db.Migrator().HasColumn("collection_items", "first_edition") {
-			if err := db.Migrator().DropColumn("collection_items", "first_edition"); err != nil {
-				log.Printf("Warning: failed to drop collection_items.first_edition column: %v", err)
-			} else {
-				log.Println("Dropped legacy collection_items.first_edition column")
-			}
-		}
+		// Note: We don't drop the collection_items columns because they're not causing issues
+		// (GORM handles them fine) and table recreation is expensive
 	}
 
 	// Ensure all card_prices have a default printing value
@@ -163,4 +152,62 @@ func migratePrintingField(db *gorm.DB) error {
 
 	log.Println("Printing field migration complete")
 	return nil
+}
+
+// dropFoilColumnSafely recreates the card_prices table without the legacy foil column.
+// This is necessary because:
+// 1. The foil column has NOT NULL constraint that blocks new inserts
+// 2. GORM's DropColumn doesn't work reliably with SQLite
+// 3. SQLite's native ALTER TABLE DROP COLUMN has limitations with indexes
+func dropFoilColumnSafely(db *gorm.DB) error {
+	// Use a transaction for atomicity
+	return db.Transaction(func(tx *gorm.DB) error {
+		// 1. Create new table without the foil column
+		if err := tx.Exec(`
+			CREATE TABLE IF NOT EXISTS card_prices_new (
+				id INTEGER PRIMARY KEY AUTOINCREMENT,
+				card_id TEXT NOT NULL,
+				condition TEXT NOT NULL,
+				printing TEXT NOT NULL DEFAULT 'Normal',
+				language TEXT NOT NULL DEFAULT 'English',
+				price_usd REAL,
+				source TEXT,
+				price_updated_at DATETIME,
+				created_at DATETIME,
+				updated_at DATETIME,
+				CONSTRAINT fk_cards_prices FOREIGN KEY (card_id) REFERENCES cards(id)
+			)
+		`).Error; err != nil {
+			return err
+		}
+
+		// 2. Copy data from old table (excluding foil column)
+		if err := tx.Exec(`
+			INSERT INTO card_prices_new (id, card_id, condition, printing, language, price_usd, source, price_updated_at, created_at, updated_at)
+			SELECT id, card_id, condition, printing, language, price_usd, source, price_updated_at, created_at, updated_at
+			FROM card_prices
+		`).Error; err != nil {
+			return err
+		}
+
+		// 3. Drop old table
+		if err := tx.Exec(`DROP TABLE card_prices`).Error; err != nil {
+			return err
+		}
+
+		// 4. Rename new table
+		if err := tx.Exec(`ALTER TABLE card_prices_new RENAME TO card_prices`).Error; err != nil {
+			return err
+		}
+
+		// 5. Recreate indexes
+		if err := tx.Exec(`
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_card_cond_print_lang
+			ON card_prices (card_id, condition, printing, language)
+		`).Error; err != nil {
+			return err
+		}
+
+		return nil
+	})
 }
