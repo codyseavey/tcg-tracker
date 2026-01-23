@@ -596,7 +596,7 @@ func levenshteinDistance(s1, s2 string) int {
 }
 
 // looksLikeOCRGarbage detects short strings that are likely OCR noise
-// rather than real card names. Examples: "TQG", "Zollvp", "HPAO"
+// rather than real card names. Examples: "TQG", "Zollvp", "HPAO", "ovn"
 // Real card names usually have spaces, punctuation, or are longer.
 func looksLikeOCRGarbage(name string) bool {
 	// Names with spaces or apostrophes are likely real (e.g., "Professor's Research")
@@ -610,6 +610,12 @@ func looksLikeOCRGarbage(name string) bool {
 	}
 
 	lower := strings.ToLower(name)
+
+	// Very short strings (3-4 chars) that failed fuzzy matching are likely garbage
+	// Real Pokemon names are typically 5+ characters (Mew is 3, but it would fuzzy match)
+	if len(name) <= 4 {
+		return true
+	}
 
 	// Short all-uppercase strings (like "TQG", "HPAO") are likely garbage
 	// unless they're known Pokemon names (which would have matched fuzzy)
