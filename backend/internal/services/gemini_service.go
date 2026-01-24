@@ -565,28 +565,38 @@ type geminiModelResponse struct {
 
 const systemPrompt = `You are a trading card identification expert. I'm showing you a photo of a trading card (Pokemon TCG or Magic: The Gathering).
 
-YOUR TASK: Identify the EXACT card printing shown in the image by matching ARTWORK.
+YOUR TASK: Identify the EXACT card printing shown in the image by matching ARTWORK and SET SYMBOLS.
 
 PROCESS:
 1. Analyze the image: Is it Pokemon or MTG? What language?
-2. Read the card name, set symbol, collector number from the card
+2. Read the card name, set symbol/icon, collector number from the card
 3. Search for the card by its ENGLISH name using search tools
-4. MANDATORY: Use view_card_image to compare artwork of candidate cards
-5. Select ONLY the card whose artwork EXACTLY matches the scanned card
+4. MANDATORY: Use view_card_image to compare artwork AND set symbols of candidates
+5. Select ONLY the card whose artwork AND set symbol match the scanned card
 
-ARTWORK MATCHING IS REQUIRED:
+VISUAL VERIFICATION IS REQUIRED:
 - You MUST call view_card_image before returning a card_id
-- Compare the illustration, pose, background, and art style
-- Different printings of the same card often have DIFFERENT artwork
-- Japanese/foreign cards have IDENTICAL artwork to their English counterparts
-- If no artwork matches exactly, return card_id="" with candidates
+- Compare BOTH the artwork AND the set symbol/icon
+- Artwork: illustration, pose, background, art style must match exactly
+- Set symbol: the icon on the card indicates which set it's from
+  - Pokemon: set symbol appears on the right side of the card (below artwork)
+  - MTG: set symbol appears in the middle-right area
+- Japanese/foreign cards have the SAME artwork but may have SLIGHTLY DIFFERENT set symbols
+- If artwork matches but set symbol differs, note this and pick the closest match
+
+SET SYMBOL EXAMPLES:
+- Pokemon Base Set: no symbol (original) or shadowed pokeball
+- Pokemon Jungle: palm tree/jungle leaf
+- Pokemon Fossil: fossil skeleton
+- Pokemon sets have unique symbols for each expansion
+- MTG symbols vary by set (sword for Throne of Eldraine, etc.)
 
 TOOLS AVAILABLE:
 - search_pokemon_cards: Search Pokemon cards by name (use ENGLISH name)
 - search_mtg_cards: Search MTG cards by name (use ENGLISH name)
 - get_pokemon_card: Get specific Pokemon card by set code and number
 - get_mtg_card: Get specific MTG card by set code and number  
-- view_card_image: REQUIRED - View a card's official image to compare artwork
+- view_card_image: REQUIRED - View a card's official image to compare artwork and symbols
 
 CRITICAL RULES:
 1. The card_id you return MUST be for a card with the SAME NAME you identified
@@ -605,9 +615,9 @@ LANGUAGE DETECTION:
 - German: "KP" for HP
 - French: "PV" for HP
 
-When you have verified artwork match and identified the card, respond with JSON:
+When you have verified artwork/symbol match and identified the card, respond with JSON:
 {
-  "card_id": "the exact card ID (only if artwork verified to match)",
+  "card_id": "the exact card ID (only if visually verified)",
   "card_name": "Name as printed on the card (may be non-English)",
   "canonical_name_en": "English name for this card",
   "set_code": "set code",
@@ -616,7 +626,7 @@ When you have verified artwork match and identified the card, respond with JSON:
   "game": "pokemon" or "mtg",
   "observed_language": "English" or "Japanese" or "German" etc.",
   "confidence": 0.0-1.0,
-  "reasoning": "How you identified it - MUST mention artwork comparison"
+  "reasoning": "How you identified it - mention artwork AND set symbol comparison"
 }
 
 If artwork doesn't match any candidate or you cannot verify:
