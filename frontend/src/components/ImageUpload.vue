@@ -1,32 +1,13 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref } from 'vue'
 import { cardService } from '../services/api'
 
 const emit = defineEmits(['results', 'error'])
-
-const props = defineProps({
-  game: {
-    type: String,
-    required: true,
-    validator: (value) => ['pokemon', 'mtg'].includes(value)
-  }
-})
 
 const dragActive = ref(false)
 const isProcessing = ref(false)
 const selectedFile = ref(null)
 const previewUrl = ref(null)
-const ocrStatus = ref(null)
-
-const isOCRAvailable = computed(() => ocrStatus.value?.server_ocr_available === true)
-
-onMounted(async () => {
-  try {
-    ocrStatus.value = await cardService.getOCRStatus()
-  } catch {
-    ocrStatus.value = { server_ocr_available: false }
-  }
-})
 
 const handleDragEnter = (e) => {
   e.preventDefault()
@@ -85,12 +66,12 @@ const clearSelection = () => {
 }
 
 const processImage = async () => {
-  if (!selectedFile.value || !isOCRAvailable.value) return
+  if (!selectedFile.value) return
 
   isProcessing.value = true
 
   try {
-    const result = await cardService.identifyFromImage(selectedFile.value, props.game)
+    const result = await cardService.identifyFromImage(selectedFile.value)
     emit('results', result)
     clearSelection()
   } catch (e) {
@@ -103,21 +84,9 @@ const processImage = async () => {
 
 <template>
   <div class="image-upload">
-    <!-- OCR Status Warning -->
-    <div v-if="ocrStatus && !isOCRAvailable" class="mb-4 p-4 bg-yellow-100 dark:bg-yellow-900 rounded-lg">
-      <div class="flex items-center">
-        <svg class="w-5 h-5 text-yellow-600 dark:text-yellow-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-        </svg>
-        <span class="text-yellow-700 dark:text-yellow-300 text-sm">
-          Server-side image scanning is not available. Please use text search instead.
-        </span>
-      </div>
-    </div>
-
     <!-- Drop Zone -->
     <div
-      v-if="!selectedFile && isOCRAvailable"
+      v-if="!selectedFile"
       class="border-2 border-dashed rounded-lg p-8 text-center transition-colors"
       :class="{
         'border-blue-500 bg-blue-50 dark:bg-blue-900/20': dragActive,
@@ -163,24 +132,16 @@ const processImage = async () => {
       <div class="mt-4">
         <button
           @click="processImage"
-          :disabled="isProcessing || !isOCRAvailable"
+          :disabled="isProcessing"
           class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-medium py-2 px-4 rounded-lg transition-colors flex items-center justify-center"
         >
           <svg v-if="isProcessing" class="animate-spin -ml-1 mr-2 h-5 w-5" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
           </svg>
-          {{ isProcessing ? 'Processing...' : 'Identify Card' }}
+          {{ isProcessing ? 'Identifying...' : 'Identify Card' }}
         </button>
       </div>
-    </div>
-
-    <!-- Set Identifier Status -->
-    <div v-if="ocrStatus?.set_identifier?.healthy" class="mt-4 text-xs text-gray-500 dark:text-gray-400 flex items-center">
-      <svg class="w-4 h-4 mr-1 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
-      </svg>
-      Set icon matching enabled
     </div>
   </div>
 </template>

@@ -91,29 +91,18 @@ export const cardService = {
   },
 
   /**
-   * Identify cards from an uploaded image using server-side OCR
+   * Identify cards from an uploaded image using Gemini Vision API
    * @param {File} file - The image file to process
-   * @param {string} game - 'pokemon' or 'mtg'
    * @returns {Promise<Object>} - The identification result with cards and parsed data
    */
-  async identifyFromImage(file, game) {
+  async identifyFromImage(file) {
     const formData = new FormData()
     formData.append('image', file)
-    formData.append('game', game)
 
     const response = await api.post('/cards/identify-image', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 60000, // 60 second timeout for image processing
+      timeout: 90000, // 90 second timeout for Gemini multi-turn identification
     })
-    return response.data
-  },
-
-  /**
-   * Check if server-side OCR is available
-   * @returns {Promise<Object>} - Status of OCR and set identifier services
-   */
-  async getOCRStatus() {
-    const response = await api.get('/cards/ocr-status')
     return response.data
   }
 }
