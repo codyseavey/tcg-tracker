@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bytes"
+	"log"
 	"net/http"
 	"sort"
 	"strings"
@@ -80,13 +81,17 @@ func (h *CardHandler) SearchCards(c *gin.Context) {
 		}
 	}
 
-	// Cache cards in database (log errors but don't fail the request)
-	db := database.GetDB()
-	for i := range result.Cards {
-		if err := db.Save(&result.Cards[i]).Error; err != nil {
-			// Log the error but continue - caching failure shouldn't fail the search
-			c.Writer.Header().Set("X-Cache-Warning", "Some cards failed to cache")
-		}
+	// Cache cards in database asynchronously (don't block the response)
+	if len(result.Cards) > 0 {
+		// Copy cards slice for async goroutine (avoid data race with response)
+		cardsToCache := make([]models.Card, len(result.Cards))
+		copy(cardsToCache, result.Cards)
+		go func(cards []models.Card) {
+			db := database.GetDB()
+			if err := db.Save(&cards).Error; err != nil {
+				log.Printf("Warning: failed to cache %d cards: %v", len(cards), err)
+			}
+		}(cardsToCache)
 	}
 
 	c.JSON(http.StatusOK, result)
@@ -132,10 +137,12 @@ func (h *CardHandler) GetCard(c *gin.Context) {
 		return
 	}
 
-	// Cache the card (log error but don't fail the request)
-	if err := db.Save(card).Error; err != nil {
-		c.Writer.Header().Set("X-Cache-Warning", "Failed to cache card")
-	}
+	// Cache the card asynchronously (don't block the response)
+	go func(cardToCache models.Card) {
+		if err := db.Save(&cardToCache).Error; err != nil {
+			log.Printf("Warning: failed to cache card %s: %v", cardToCache.ID, err)
+		}
+	}(*card)
 
 	c.JSON(http.StatusOK, card)
 }
@@ -589,12 +596,17 @@ func (h *CardHandler) searchAndMatchCards(c *gin.Context, parsed *services.OCRRe
 		}
 	}
 
-	// Batch cache cards in database (log errors but don't fail the request)
+	// Cache cards in database asynchronously (don't block the response)
 	if len(result.Cards) > 0 {
-		db := database.GetDB()
-		if err := db.Save(&result.Cards).Error; err != nil {
-			c.Writer.Header().Set("X-Cache-Warning", "Some cards failed to cache")
-		}
+		// Copy cards slice for async goroutine (avoid data race)
+		cardsToCache := make([]models.Card, len(result.Cards))
+		copy(cardsToCache, result.Cards)
+		go func(cards []models.Card) {
+			db := database.GetDB()
+			if err := db.Save(&cards).Error; err != nil {
+				log.Printf("Warning: failed to cache %d identified cards: %v", len(cards), err)
+			}
+		}(cardsToCache)
 	}
 
 	return result, textMatches, grouped, nil

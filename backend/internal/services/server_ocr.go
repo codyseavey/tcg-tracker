@@ -147,20 +147,88 @@ func (s *ServerOCRService) ProcessImageBytes(imageData []byte) (*ServerOCRResult
 }
 
 // ProcessBase64Image processes a base64-encoded image
+// Optimized: passes base64 directly to identifier service without decode/re-encode
 func (s *ServerOCRService) ProcessBase64Image(base64Data string) (*ServerOCRResult, error) {
-	// Remove data URL prefix if present
+	// Remove data URL prefix if present (e.g., "data:image/jpeg;base64,")
 	if idx := strings.Index(base64Data, ","); idx != -1 {
 		base64Data = base64Data[idx+1:]
 	}
 
-	imageData, err := base64.StdEncoding.DecodeString(base64Data)
+	// Validate base64 format before sending (quick sanity check)
+	if len(base64Data) == 0 {
+		return &ServerOCRResult{
+			Error: "empty base64 data",
+		}, fmt.Errorf("empty base64 data")
+	}
+
+	// Pass base64 directly to identifier service (avoids decode/re-encode overhead)
+	return s.processBase64Direct(base64Data)
+}
+
+// processBase64Direct sends base64 data directly to the identifier service
+// This avoids the CPU overhead of decoding and re-encoding the image
+func (s *ServerOCRService) processBase64Direct(base64Data string) (*ServerOCRResult, error) {
+	payload := map[string]string{
+		"image_b64": base64Data,
+		"backend":   "easyocr",
+	}
+
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return &ServerOCRResult{
-			Error: fmt.Sprintf("invalid base64 data: %v", err),
+			Error: fmt.Sprintf("failed to serialize OCR request: %v", err),
 		}, err
 	}
 
-	return s.ProcessImageBytes(imageData)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	url := strings.TrimRight(s.identifierURL, "/") + "/ocr"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return &ServerOCRResult{
+			Error: fmt.Sprintf("failed to create OCR request: %v", err),
+		}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return &ServerOCRResult{
+			Error: fmt.Sprintf("OCR service request failed: %v", err),
+		}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		return &ServerOCRResult{
+			Error: fmt.Sprintf("OCR service error: %s", strings.TrimSpace(string(data))),
+		}, fmt.Errorf("ocr service status %d", resp.StatusCode)
+	}
+
+	var ocrResp struct {
+		Text       string   `json:"text"`
+		Lines      []string `json:"lines"`
+		Confidence float64  `json:"confidence"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&ocrResp); err != nil {
+		return &ServerOCRResult{
+			Error: fmt.Sprintf("failed to decode OCR response: %v", err),
+		}, err
+	}
+
+	lines := ocrResp.Lines
+	if len(lines) == 0 && strings.TrimSpace(ocrResp.Text) != "" {
+		lines = splitAndCleanLines(ocrResp.Text)
+	}
+
+	return &ServerOCRResult{
+		Text:       ocrResp.Text,
+		Lines:      lines,
+		Confidence: ocrResp.Confidence,
+	}, nil
 }
 
 // splitAndCleanLines splits text into lines and removes empty/whitespace lines
