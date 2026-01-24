@@ -16,7 +16,7 @@ env:
 jobs:
   # Detect which components changed to skip unnecessary work
   check-changes:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, fedora]
     outputs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
@@ -45,9 +45,9 @@ jobs:
               - 'deployment/**'
               - 'docker-compose*.yml'
 
-  # Backend: lint and test run in parallel, build starts after lint
+  # Backend: lint and test in parallel on self-hosted (leverages local Go cache)
   lint-backend:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, fedora]
     needs: check-changes
     if: needs.check-changes.outputs.backend == 'true' || github.event_name == 'pull_request'
     defaults:
@@ -62,14 +62,13 @@ jobs:
           cache: true
           cache-dependency-path: backend/go.sum
       - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: latest
-          working-directory: backend
-          args: --timeout=5m
+        run: |
+          # Install golangci-lint if not present
+          which golangci-lint || go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+          golangci-lint run --timeout=5m
 
   test-backend:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, fedora]
     needs: check-changes
     if: needs.check-changes.outputs.backend == 'true' || github.event_name == 'pull_request'
     defaults:
@@ -85,16 +84,10 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Run tests
         run: go test -race -coverprofile=coverage.out ./...
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-coverage
-          path: backend/coverage.out
-          retention-days: 7
 
-  # Frontend: lint and build combined (build includes lint check)
+  # Frontend: lint and build on self-hosted (leverages local npm cache)
   build-frontend:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, fedora]
     needs: check-changes
     if: needs.check-changes.outputs.frontend == 'true' || needs.check-changes.outputs.backend == 'true' || github.event_name == 'pull_request'
     defaults:
@@ -115,9 +108,9 @@ jobs:
       - name: Build
         run: npm run build
 
-  # Identifier: lint and test in parallel
+  # Identifier: lint and test in parallel on self-hosted
   lint-identifier:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, fedora]
     needs: check-changes
     if: needs.check-changes.outputs.identifier == 'true' || github.event_name == 'pull_request'
     defaults:
@@ -137,7 +130,7 @@ jobs:
         run: ruff check .
 
   test-identifier:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, fedora]
     needs: check-changes
     if: needs.check-changes.outputs.identifier == 'true' || github.event_name == 'pull_request'
     defaults:
@@ -158,9 +151,10 @@ jobs:
       - name: Run tests
         run: pytest tests/ -v
 
-  # Build app image: starts after lint passes (parallel with tests)
+  # Build app image locally on self-hosted (uses local Docker layer cache)
+  # Image is built locally, pushed to GHCR for versioning, then used directly (no pull needed)
   build-push-app:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, fedora]
     needs: [check-changes, lint-backend, build-frontend]
     if: |
       always() &&
@@ -168,78 +162,60 @@ jobs:
       github.ref == 'refs/heads/main' &&
       (needs.lint-backend.result == 'success' || needs.lint-backend.result == 'skipped') &&
       (needs.build-frontend.result == 'success' || needs.build-frontend.result == 'skipped')
-    permissions:
-      contents: read
-      packages: write
+    env:
+      APP_DIR: "/home/cody/tcg-tracker"
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      
       - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE_PREFIX }}/app
-          tags: |
-            type=sha,prefix=,format=long
-            type=raw,value=latest
-      - name: Build and push combined app image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-  # Build identifier image: starts after lint passes (parallel with tests)
+      - name: Build app image (uses local Docker cache)
+        run: |
+          docker build \
+            --tag ${{ env.IMAGE_PREFIX }}/app:${{ github.sha }} \
+            --tag ${{ env.IMAGE_PREFIX }}/app:latest \
+            --cache-from ${{ env.IMAGE_PREFIX }}/app:latest \
+            --build-arg BUILDKIT_INLINE_CACHE=1 \
+            .
+      
+      - name: Push to GHCR (for versioning/rollback)
+        run: |
+          docker push ${{ env.IMAGE_PREFIX }}/app:${{ github.sha }}
+          docker push ${{ env.IMAGE_PREFIX }}/app:latest
+
+  # Build identifier image locally on self-hosted
   build-push-identifier:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, fedora]
     needs: [check-changes, lint-identifier]
     if: |
       always() &&
       github.event_name == 'push' && 
       github.ref == 'refs/heads/main' &&
       (needs.lint-identifier.result == 'success' || needs.lint-identifier.result == 'skipped')
-    permissions:
-      contents: read
-      packages: write
+    env:
+      APP_DIR: "/home/cody/tcg-tracker"
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      
       - name: Log in to GHCR
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.IMAGE_PREFIX }}/identifier
-          tags: |
-            type=sha,prefix=,format=long
-            type=raw,value=latest
-      - name: Build and push identifier image
-        uses: docker/build-push-action@v6
-        with:
-          context: ./identifier
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-  # Mobile: runs independently, doesn't block deploy
+      - name: Build identifier image (uses local Docker cache)
+        run: |
+          docker build \
+            --tag ${{ env.IMAGE_PREFIX }}/identifier:${{ github.sha }} \
+            --tag ${{ env.IMAGE_PREFIX }}/identifier:latest \
+            --cache-from ${{ env.IMAGE_PREFIX }}/identifier:latest \
+            --build-arg BUILDKIT_INLINE_CACHE=1 \
+            ./identifier
+      
+      - name: Push to GHCR (for versioning/rollback)
+        run: |
+          docker push ${{ env.IMAGE_PREFIX }}/identifier:${{ github.sha }}
+          docker push ${{ env.IMAGE_PREFIX }}/identifier:latest
+
+  # Mobile: keep on GitHub-hosted (Flutter setup is complex on Fedora)
   lint-test-mobile:
     runs-on: ubuntu-latest
     needs: check-changes
@@ -261,12 +237,6 @@ jobs:
         run: flutter analyze --no-fatal-infos
       - name: Run tests
         run: flutter test --coverage
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: mobile-coverage
-          path: mobile/coverage/lcov.info
-          retention-days: 7
 
   build-mobile:
     runs-on: ubuntu-latest
@@ -298,7 +268,7 @@ jobs:
           name: android-apk
           path: mobile/build/app/outputs/flutter-apk/app-release.apk
 
-  # Deploy: runs as soon as images are built, tests must pass
+  # Deploy: images already built locally, no pull needed!
   deploy:
     runs-on: [self-hosted, fedora]
     needs: [check-changes, build-push-app, build-push-identifier, test-backend, test-identifier]
@@ -312,46 +282,45 @@ jobs:
       (needs.test-identifier.result == 'success' || needs.test-identifier.result == 'skipped')
     environment: production
     env:
-      SERVER: "192.168.86.227"
       APP_DIR: "/home/cody/tcg-tracker"
       IMAGE_TAG: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Sync deployment files to server
+      - name: Copy deployment files
         run: |
-          ssh $SERVER "mkdir -p $APP_DIR/deployment"
-          scp docker-compose.yml docker-compose.gpu.yml $SERVER:$APP_DIR/
-          scp deployment/*.service deployment/*.conf $SERVER:$APP_DIR/deployment/ 2>/dev/null || true
+          mkdir -p $APP_DIR/deployment
+          cp docker-compose.yml docker-compose.gpu.yml $APP_DIR/
+          cp deployment/*.service deployment/*.conf $APP_DIR/deployment/ 2>/dev/null || true
 
       - name: Ensure data directories exist
         run: |
-          ssh $SERVER "mkdir -p $APP_DIR/data/pokemon-tcg-data $APP_DIR/secrets"
-          ssh $SERVER "ln -sf /home/cody/google-cloud-adminSvc.json $APP_DIR/secrets/gcloud.json 2>/dev/null || true"
+          mkdir -p $APP_DIR/data/pokemon-tcg-data $APP_DIR/secrets
+          ln -sf /home/cody/google-cloud-adminSvc.json $APP_DIR/secrets/gcloud.json 2>/dev/null || true
 
       - name: Save IMAGE_TAG for systemd service
-        run: |
-          ssh $SERVER "echo 'IMAGE_TAG=${{ github.sha }}' > $APP_DIR/.env.deploy"
+        run: echo "IMAGE_TAG=${{ github.sha }}" > $APP_DIR/.env.deploy
 
-      - name: Log in to GHCR on server
+      - name: Deploy (no pull needed - images built locally)
         run: |
-          ssh $SERVER "echo ${{ secrets.GITHUB_TOKEN }} | docker login ghcr.io -u ${{ github.actor }} --password-stdin"
-
-      - name: Pull and deploy images
-        run: |
-          ssh $SERVER "cd $APP_DIR && IMAGE_TAG=${{ github.sha }} docker compose -f docker-compose.yml -f docker-compose.gpu.yml pull"
-          ssh $SERVER "cd $APP_DIR && IMAGE_TAG=${{ github.sha }} docker compose -f docker-compose.yml -f docker-compose.gpu.yml down --remove-orphans || true"
-          ssh $SERVER "docker rm -f tcg-backend tcg-identifier 2>/dev/null || true"
-          ssh $SERVER "cd $APP_DIR && IMAGE_TAG=${{ github.sha }} JUSTTCG_API_KEY='${{ secrets.JUSTTCG_API_KEY }}' ADMIN_KEY='${{ secrets.ADMIN_KEY }}' docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d"
+          cd $APP_DIR
+          # Stop existing containers
+          IMAGE_TAG=${{ github.sha }} docker compose -f docker-compose.yml -f docker-compose.gpu.yml down --remove-orphans || true
+          docker rm -f tcg-backend tcg-identifier 2>/dev/null || true
+          # Start with locally-built images (no pull!)
+          IMAGE_TAG=${{ github.sha }} \
+            JUSTTCG_API_KEY='${{ secrets.JUSTTCG_API_KEY }}' \
+            ADMIN_KEY='${{ secrets.ADMIN_KEY }}' \
+            docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
 
       - name: Wait for services and verify health
         run: |
           echo "Waiting for services to start..."
           sleep 5
-          ssh $SERVER "cd $APP_DIR && docker compose -f docker-compose.yml -f docker-compose.gpu.yml ps"
+          cd $APP_DIR && docker compose -f docker-compose.yml -f docker-compose.gpu.yml ps
           echo "Checking backend health..."
           for i in 1 2 3; do
-            if ssh $SERVER "curl -sf http://localhost:3080/health"; then
+            if curl -sf http://localhost:3080/health; then
               echo "Health check passed!"
               break
             fi
@@ -362,13 +331,11 @@ jobs:
       - name: Setup systemd and nginx (only if deployment files changed)
         if: needs.check-changes.outputs.deployment == 'true'
         run: |
-          scp deployment/tcg-docker.service $SERVER:/tmp/
-          ssh $SERVER "sudo mv /tmp/tcg-docker.service /etc/systemd/system/"
-          ssh $SERVER "sudo systemctl daemon-reload && sudo systemctl enable tcg-docker"
-          scp deployment/tcg.seavey.dev.conf $SERVER:/tmp/
-          ssh $SERVER "sudo mv /tmp/tcg.seavey.dev.conf /etc/nginx/sites-available/tcg.seavey.dev.conf"
-          ssh $SERVER "sudo ln -sf /etc/nginx/sites-available/tcg.seavey.dev.conf /etc/nginx/sites-enabled/"
-          ssh $SERVER "sudo nginx -t && sudo systemctl reload nginx"
+          sudo cp $APP_DIR/deployment/tcg-docker.service /etc/systemd/system/
+          sudo systemctl daemon-reload && sudo systemctl enable tcg-docker
+          sudo cp $APP_DIR/deployment/tcg.seavey.dev.conf /etc/nginx/sites-available/
+          sudo ln -sf /etc/nginx/sites-available/tcg.seavey.dev.conf /etc/nginx/sites-enabled/
+          sudo nginx -t && sudo systemctl reload nginx
 
       - name: Purge Cloudflare cache
         if: needs.check-changes.outputs.frontend == 'true'
@@ -379,12 +346,11 @@ jobs:
             --data '{"hosts":["tcg.seavey.dev"]}'
 
       - name: Clean up old Docker images
-        run: |
-          ssh $SERVER "docker image prune -af --filter 'until=168h'" || true
+        run: docker image prune -af --filter 'until=168h' || true
 
       - name: Deployment summary
         run: |
           echo "=== Deployment Complete ==="
           echo "App URL: https://tcg.seavey.dev"
           echo "Image tag: ${{ github.sha }}"
-          ssh $SERVER "cd $APP_DIR && docker compose -f docker-compose.yml -f docker-compose.gpu.yml ps"
+          cd $APP_DIR && docker compose -f docker-compose.yml -f docker-compose.gpu.yml ps
