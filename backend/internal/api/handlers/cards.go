@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"unicode"
 
 	"github.com/gin-gonic/gin"
 
@@ -13,6 +14,50 @@ import (
 	"github.com/codyseavey/tcg-tracker/backend/internal/models"
 	"github.com/codyseavey/tcg-tracker/backend/internal/services"
 )
+
+// cardNameMatches checks if two card names are equivalent for validation purposes.
+// Handles variations like "Poké Ball" vs "Poke Ball", accented characters, and case differences.
+func cardNameMatches(resolvedName, expectedName string) bool {
+	// Normalize both names: lowercase, remove accents, strip non-alphanumeric
+	normalize := func(s string) string {
+		// Simple accent removal by checking for common variants
+		// é -> e, ü -> u, etc.
+		var sb strings.Builder
+		for _, r := range strings.ToLower(s) {
+			switch {
+			case r >= 'a' && r <= 'z':
+				sb.WriteRune(r)
+			case r >= '0' && r <= '9':
+				sb.WriteRune(r)
+			case unicode.Is(unicode.Mn, r):
+				// Skip combining marks (accents)
+				continue
+			default:
+				// Map accented chars to base chars
+				switch r {
+				case 'é', 'è', 'ê', 'ë':
+					sb.WriteRune('e')
+				case 'á', 'à', 'â', 'ä', 'ã':
+					sb.WriteRune('a')
+				case 'í', 'ì', 'î', 'ï':
+					sb.WriteRune('i')
+				case 'ó', 'ò', 'ô', 'ö', 'õ':
+					sb.WriteRune('o')
+				case 'ú', 'ù', 'û', 'ü':
+					sb.WriteRune('u')
+				case 'ñ':
+					sb.WriteRune('n')
+				case 'ç':
+					sb.WriteRune('c')
+					// Skip other non-alphanumeric chars (spaces, punctuation)
+				}
+			}
+		}
+		return sb.String()
+	}
+
+	return normalize(resolvedName) == normalize(expectedName)
+}
 
 type CardHandler struct {
 	scryfallService *services.ScryfallService
@@ -226,21 +271,6 @@ func (h *CardHandler) IdentifyCardFromImage(c *gin.Context) {
 		return
 	}
 
-	// Build response with all Gemini fields
-	response := gin.H{
-		"card_id":           result.CardID,
-		"card_name":         result.CardName,
-		"canonical_name_en": result.CanonicalNameEN,
-		"set_code":          result.SetCode,
-		"set_name":          result.SetName,
-		"card_number":       result.Number,
-		"game":              result.Game,
-		"observed_language": result.ObservedLang,
-		"confidence":        result.Confidence,
-		"reasoning":         result.Reasoning,
-		"turns_used":        result.TurnsUsed,
-	}
-
 	// Helper to resolve a card by ID, trying both services if game is unknown
 	resolveCard := func(cardID, game string) *models.Card {
 		if game == "pokemon" {
@@ -259,20 +289,91 @@ func (h *CardHandler) IdentifyCardFromImage(c *gin.Context) {
 		return nil
 	}
 
+	// Validate that card_id matches the identified name to catch Gemini hallucinations
+	// e.g., Gemini says "Poké Ball #96" but returns card_id for "Double Colorless Energy #96"
+	validatedCardID := result.CardID
+	var mismatchDetected bool
+	if result.CardID != "" && result.CanonicalNameEN != "" {
+		if resolvedCard := resolveCard(result.CardID, result.Game); resolvedCard != nil {
+			if !cardNameMatches(resolvedCard.Name, result.CanonicalNameEN) {
+				log.Printf("Gemini card_id mismatch: identified '%s' but card_id '%s' resolves to '%s'",
+					result.CanonicalNameEN, result.CardID, resolvedCard.Name)
+				// Clear the card_id since it doesn't match - we'll search by name instead
+				validatedCardID = ""
+				mismatchDetected = true
+			}
+		}
+	}
+
+	// Build response with all Gemini fields (use validated card_id)
+	response := gin.H{
+		"card_id":           validatedCardID,
+		"card_name":         result.CardName,
+		"canonical_name_en": result.CanonicalNameEN,
+		"set_code":          result.SetCode,
+		"set_name":          result.SetName,
+		"card_number":       result.Number,
+		"game":              result.Game,
+		"observed_language": result.ObservedLang,
+		"confidence":        result.Confidence,
+		"reasoning":         result.Reasoning,
+		"turns_used":        result.TurnsUsed,
+	}
+
 	// Always build a cards array for the client to display
 	var cards []models.Card
 
-	// If we got a card ID, fetch the primary match
-	if result.CardID != "" {
-		if card := resolveCard(result.CardID, result.Game); card != nil {
+	// If we have a validated card ID, fetch the primary match
+	if validatedCardID != "" {
+		if card := resolveCard(validatedCardID, result.Game); card != nil {
 			cards = append(cards, *card)
 		}
 	}
 
-	// Also include alternative candidates (for low confidence or user choice)
+	// If Gemini returned a mismatched card_id OR no card_id, search by name to find candidates
+	if (mismatchDetected || validatedCardID == "") && result.CanonicalNameEN != "" {
+		searchName := result.CanonicalNameEN
+		var searchResult *models.CardSearchResult
+		var err error
+
+		if result.Game == "pokemon" {
+			searchResult, err = h.pokemonService.SearchCards(searchName)
+		} else if result.Game == "mtg" {
+			searchResult, err = h.scryfallService.SearchCards(searchName)
+		}
+
+		if err == nil && searchResult != nil {
+			// Add search results as candidates (limit to 10 to avoid overwhelming the UI)
+			for i, card := range searchResult.Cards {
+				if i >= 10 {
+					break
+				}
+				// Don't add duplicates
+				isDupe := false
+				for _, existing := range cards {
+					if existing.ID == card.ID {
+						isDupe = true
+						break
+					}
+				}
+				if !isDupe {
+					cards = append(cards, card)
+				}
+			}
+		}
+	}
+
+	// Also include Gemini's alternative candidates (for low confidence or user choice)
 	for _, candidate := range result.Candidates {
-		// Skip if already added as primary match
-		if candidate.ID == result.CardID {
+		// Skip if already added
+		isDupe := false
+		for _, existing := range cards {
+			if existing.ID == candidate.ID {
+				isDupe = true
+				break
+			}
+		}
+		if isDupe {
 			continue
 		}
 		if card := resolveCard(candidate.ID, result.Game); card != nil {

@@ -583,6 +583,13 @@ TOOLS AVAILABLE:
 - get_mtg_card: Get specific MTG card by set code and number
 - view_card_image: View a candidate card's official image to compare artwork
 
+CRITICAL - card_id MUST MATCH card name:
+- The card_id you return MUST be for a card with the SAME NAME you identified
+- NEVER return a card_id just because the collector number matches - the NAME must also match
+- If you search for "Poké Ball" and only find "Double Colorless Energy" at #96, that is NOT a match
+- Japanese cards often have DIFFERENT collector numbers than English versions of the same card
+- If you cannot find an exact name match in our database, set card_id to "" and list candidates
+
 IMPORTANT:
 - Many cards have multiple printings across different sets with DIFFERENT artwork
 - Always verify artwork matches before confirming
@@ -590,6 +597,7 @@ IMPORTANT:
 - For Pokemon: set codes look like "swsh4", "sv4", "mew", "base1", "neo1"
 - For MTG: set codes are 3 letters like "2XM", "MH2", "ONE"
 - For non-English cards: identify the language, then search by English name, match by artwork
+- Our database only contains ENGLISH card data - Japanese/foreign cards may have different numbering
 
 LANGUAGE DETECTION:
 - Japanese cards have Japanese characters (ポケモン, etc.)
@@ -599,7 +607,7 @@ LANGUAGE DETECTION:
 
 When you have identified the card with confidence, respond with JSON:
 {
-  "card_id": "the exact card ID from the database",
+  "card_id": "the exact card ID from the database (MUST be a card with matching name)",
   "card_name": "Name as printed on the card (may be non-English)",
   "canonical_name_en": "English name for this card (ALWAYS in English)",
   "set_code": "set",
@@ -611,16 +619,16 @@ When you have identified the card with confidence, respond with JSON:
   "reasoning": "explanation of how you identified the card"
 }
 
-If you cannot identify the card, respond with:
+If you cannot find a matching card in the database (e.g., Japanese card with different numbering), respond with:
 {
   "card_id": "",
-  "card_name": "best guess name (as printed)",
-  "canonical_name_en": "best guess English name",
-  "game": "pokemon" or "mtg" or "unknown",
-  "observed_language": "detected language or unknown",
+  "card_name": "Name as printed on the card",
+  "canonical_name_en": "English translation of the name",
+  "game": "pokemon" or "mtg",
+  "observed_language": "detected language",
   "confidence": 0.0,
-  "reasoning": "why identification failed",
-  "candidates": [list of possible matches with their IDs]
+  "reasoning": "Card identified as [name] but exact printing not found in database. Showing alternatives.",
+  "candidates": [{"id": "...", "name": "..."}, ...]
 }`
 
 var toolDeclarations = []geminiFunctionDecl{
