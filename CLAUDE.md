@@ -122,8 +122,8 @@ Environment variables:
 | `SnapshotService` | `internal/services/snapshot_service.go` | Daily collection value snapshots for historical tracking |
 | `ImageStorageService` | `internal/services/image_storage.go` | Store and retrieve scanned card images |
 | `TCGPlayerSyncService` | `internal/services/tcgplayer_sync.go` | Bulk sync TCGPlayerIDs from JustTCG for Pokemon cards |
-| `HybridTranslationService` | `internal/services/hybrid_translation.go` | Japanese card name translation (static map + Gemini + cache + Google API) |
-| `GeminiTranslationService` | `internal/services/gemini_translation.go` | Gemini 3 Flash for Japanese card identification with structured output |
+| `HybridTranslationService` | `internal/services/hybrid_translation.go` | Japanese card name translation (static map + Gemini vision/text + cache + Google API) |
+| `GeminiTranslationService` | `internal/services/gemini_translation.go` | Gemini 3 Flash for Japanese card identification (vision and text modes) |
 | `TranslationCacheService` | `internal/services/translation_cache.go` | SQLite cache for translation API results (with TTL for Gemini) |
 | `TranslationService` | `internal/services/translation_service.go` | Google Cloud Translation API v3 client (fallback) |
 
@@ -193,8 +193,9 @@ Base URL: `http://localhost:8080/api`
 
 1. **Card Search**: User searches → Backend queries local Pokemon data or Scryfall API → Returns cards with cached prices
 2. **Card Scanning (Server OCR)**: Mobile captures image → Backend sends to identifier service → EasyOCR extracts text → Backend parses OCR text → Matches card by name/set/number
-3. **Card Scanning (Fallback)**: If server OCR unavailable → Mobile uses Google ML Kit locally → Sends text to backend for parsing
-4. **Price Updates**: Background worker runs every 15 minutes → Updates up to 100 cards per batch via JustTCG (skips when quota exhausted)
+3. **Card Scanning (Japanese)**: Mobile captures image → Backend detects Japanese language → Sends image to Gemini 3 Flash vision → Returns official English card name → Matches card in database
+4. **Card Scanning (Fallback)**: If server OCR unavailable → Mobile uses Google ML Kit locally → Sends text to backend for parsing
+5. **Price Updates**: Background worker runs every 15 minutes → Updates up to 100 cards per batch via JustTCG (skips when quota exhausted)
 
 ## Important Implementation Details
 
@@ -288,11 +289,20 @@ Japanese cards require special processing since the Pokemon database is English-
 - **Skip patterns**: Filters Japanese trainer card types (サポート, グッズ, スタジアム) and common text
 - **Fallback to card number**: Japanese-only cards (no English name) rely on set code + card number matching
 
-**Hybrid Translation (for low-confidence matches):**
+**Gemini Vision Identification (Preferred for Japanese):**
+For Japanese Pokemon cards processed via `/cards/identify-image`, the system uses Gemini 3 Flash vision:
+1. **Image-based identification**: Card image sent directly to Gemini with vision prompt
+2. **Returns structured data**: Official English card name, card type, set code, card number, confidence score
+3. **Much more accurate**: Gemini can see the entire card (artwork, layout, symbols) vs just OCR text
+4. **Fallback to OCR flow**: If Gemini vision fails, falls back to standard OCR + text matching
+
+This approach bypasses OCR errors and translation issues entirely since Gemini identifies the card visually.
+
+**Hybrid Translation (Fallback for text-based identification):**
 When card matching confidence is below `TRANSLATION_CONFIDENCE_THRESHOLD` (default: 800):
 1. **Static translation**: 1025 Pokemon + common trainer cards translated instantly via `JapaneseToEnglishNames` map
 2. **Cache check**: Translations cached in SQLite (`translation_caches` table) to avoid repeat API calls
-3. **Gemini 3 Flash**: If cache miss, uses Gemini for card identification with structured JSON output (returns candidates with confidence scores)
+3. **Gemini 3 Flash text**: If cache miss, uses Gemini for text-based card identification
 4. **Google Cloud Translation API**: Fallback if Gemini confidence < 60% or unavailable
 5. **Re-match**: Translated text is matched against English database
 

@@ -209,7 +209,8 @@ func (h *CardHandler) IdentifyCard(c *gin.Context) {
 }
 
 // IdentifyCardFromImage processes an uploaded image with server-side OCR
-// and returns card matches
+// and returns card matches. For Japanese Pokemon cards, it uses Gemini vision
+// for more accurate identification instead of OCR + text matching.
 func (h *CardHandler) IdentifyCardFromImage(c *gin.Context) {
 	// Check if server OCR is available
 	if !h.serverOCRService.IsAvailable() {
@@ -230,6 +231,7 @@ func (h *CardHandler) IdentifyCardFromImage(c *gin.Context) {
 	}
 
 	// Handle image - check both file upload and base64 JSON body
+	var imageBytes []byte
 	var ocrResult *services.ServerOCRResult
 	var err error
 
@@ -250,8 +252,9 @@ func (h *CardHandler) IdentifyCardFromImage(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read uploaded file"})
 			return
 		}
+		imageBytes = buf.Bytes()
 
-		ocrResult, err = h.serverOCRService.ProcessImageBytes(buf.Bytes())
+		ocrResult, err = h.serverOCRService.ProcessImageBytes(imageBytes)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error":   "OCR processing failed",
@@ -293,7 +296,56 @@ func (h *CardHandler) IdentifyCardFromImage(c *gin.Context) {
 	text := strings.Join(ocrResult.Lines, "\n")
 	parsed := services.ParseOCRText(text, game)
 
-	// Search and match cards using shared logic
+	// For Japanese Pokemon cards with Gemini available, use image-based identification
+	// This is much more accurate than OCR + text matching for Japanese cards
+	if game == "pokemon" && parsed.DetectedLanguage == "Japanese" &&
+		h.translationService != nil && h.translationService.IsGeminiEnabled() && len(imageBytes) > 0 {
+
+		result, textMatches, err := h.identifyJapaneseCardFromImage(c, imageBytes, parsed, text)
+		if err == nil && result != nil && len(result.Cards) > 0 {
+			// Success with Gemini vision - return results
+			response := gin.H{
+				"cards":       result.Cards,
+				"total_count": result.TotalCount,
+				"has_more":    result.HasMore,
+				"ocr": gin.H{
+					"text":       text,
+					"lines":      ocrResult.Lines,
+					"confidence": ocrResult.Confidence,
+				},
+				"parsed": gin.H{
+					"card_name":            parsed.CardName,
+					"card_number":          parsed.CardNumber,
+					"set_total":            parsed.SetTotal,
+					"set_code":             parsed.SetCode,
+					"set_name":             parsed.SetName,
+					"hp":                   parsed.HP,
+					"rarity":               parsed.Rarity,
+					"is_foil":              parsed.IsFoil,
+					"foil_indicators":      parsed.FoilIndicators,
+					"foil_confidence":      parsed.FoilConfidence,
+					"is_first_edition":     parsed.IsFirstEdition,
+					"first_ed_indicators":  parsed.FirstEdIndicators,
+					"confidence":           parsed.Confidence,
+					"condition_hints":      parsed.ConditionHints,
+					"suggested_condition":  parsed.SuggestedCondition,
+					"edge_whitening_score": parsed.EdgeWhiteningScore,
+					"corner_scores":        parsed.CornerScores,
+					"match_reason":         parsed.MatchReason,
+					"candidate_sets":       parsed.CandidateSets,
+					"detected_language":    parsed.DetectedLanguage,
+					"translation_source":   parsed.TranslationSource,
+					"text_matches":         textMatches,
+				},
+			}
+			c.JSON(http.StatusOK, response)
+			return
+		}
+		// Fall through to standard OCR flow if Gemini vision fails
+		log.Printf("Gemini vision failed for Japanese card, falling back to OCR: %v", err)
+	}
+
+	// Standard OCR flow for non-Japanese cards or when Gemini vision fails
 	result, textMatches, grouped, err := h.searchAndMatchCards(c, parsed, game, text)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -342,6 +394,136 @@ func (h *CardHandler) IdentifyCardFromImage(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, response)
+}
+
+// identifyJapaneseCardFromImage uses Gemini vision to identify a Japanese Pokemon card
+// from an image, then searches for the card in the database.
+func (h *CardHandler) identifyJapaneseCardFromImage(
+	c *gin.Context,
+	imageBytes []byte,
+	parsed *services.OCRResult,
+	ocrText string,
+) (*models.CardSearchResult, []string, error) {
+	// Use Gemini vision to identify the card
+	translationResult, err := h.translationService.IdentifyFromImage(c.Request.Context(), imageBytes, "image/jpeg")
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Update parsed with translation info
+	parsed.TranslationSource = translationResult.Source
+
+	// Get the card name from Gemini
+	cardName := translationResult.TranslatedText
+	if cardName == "" {
+		return nil, nil, nil
+	}
+
+	// Get additional hints from Gemini candidates (set code, card number)
+	var setCode, cardNumber string
+	if len(translationResult.Candidates) > 0 {
+		candidate := translationResult.Candidates[0]
+		setCode = candidate.SetCode
+		cardNumber = candidate.CardNumber
+	}
+
+	log.Printf("Gemini vision identified Japanese card: name=%q, set=%q, num=%q",
+		cardName, setCode, cardNumber)
+
+	// Priority 1: If Gemini gave us set code and card number, try exact lookup
+	if setCode != "" && cardNumber != "" {
+		exactCard := h.pokemonService.GetCardBySetAndNumber(
+			strings.ToLower(setCode),
+			cardNumber,
+		)
+		if exactCard != nil {
+			log.Printf("Gemini exact match: %s (%s #%s)", exactCard.Name, exactCard.SetCode, exactCard.CardNumber)
+			return &models.CardSearchResult{
+				Cards:      []models.Card{*exactCard},
+				TotalCount: 1,
+				HasMore:    false,
+			}, nil, nil
+		}
+	}
+
+	// Priority 2: Search by card name (Gemini gives us English name)
+	result, err := h.pokemonService.SearchCards(cardName)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// If we got results, rank them by any additional OCR hints we have
+	if result != nil && len(result.Cards) > 0 {
+		// Use OCR-extracted set code/number if Gemini didn't provide them
+		if parsed.SetCode != "" && setCode == "" {
+			setCode = parsed.SetCode
+		}
+		if parsed.CardNumber != "" && cardNumber == "" {
+			cardNumber = parsed.CardNumber
+		}
+
+		// Rank cards by how well they match the hints
+		if setCode != "" || cardNumber != "" {
+			result.Cards = rankCardMatchesWithHints(result.Cards, setCode, cardNumber)
+		}
+
+		log.Printf("Gemini vision matched %d cards for %q", len(result.Cards), cardName)
+	}
+
+	return result, nil, nil
+}
+
+// rankCardMatchesWithHints reorders cards based on set code and card number hints
+func rankCardMatchesWithHints(cards []models.Card, setCode, cardNumber string) []models.Card {
+	if setCode == "" && cardNumber == "" {
+		return cards
+	}
+
+	type scoredCard struct {
+		card  models.Card
+		score int
+	}
+
+	scored := make([]scoredCard, len(cards))
+	setCodeLower := strings.ToLower(setCode)
+
+	for i, card := range cards {
+		score := 0
+
+		// Exact set code match
+		if setCode != "" && strings.ToLower(card.SetCode) == setCodeLower {
+			score += 100
+		}
+
+		// Exact card number match
+		if cardNumber != "" && card.CardNumber == cardNumber {
+			score += 50
+		}
+
+		// Partial card number match (handles leading zeros)
+		if cardNumber != "" {
+			cardNum := strings.TrimLeft(card.CardNumber, "0")
+			parsedNum := strings.TrimLeft(cardNumber, "0")
+			if cardNum == parsedNum {
+				score += 40
+			}
+		}
+
+		scored[i] = scoredCard{card: card, score: score}
+	}
+
+	// Sort by score descending
+	sort.Slice(scored, func(i, j int) bool {
+		return scored[i].score > scored[j].score
+	})
+
+	// Extract sorted cards
+	result := make([]models.Card, len(scored))
+	for i, sc := range scored {
+		result[i] = sc.card
+	}
+
+	return result
 }
 
 // GetOCRStatus returns the status of server-side OCR capability

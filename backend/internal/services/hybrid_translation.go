@@ -220,6 +220,46 @@ func (s *HybridTranslationService) TranslateForMatchingLegacy(
 	return result.TranslatedText, apiUsed, err
 }
 
+// IdentifyFromImage uses Gemini vision to identify a card from an image.
+// This is more reliable than OCR + text translation for Japanese cards.
+// Returns: TranslationResult with candidates, error
+func (s *HybridTranslationService) IdentifyFromImage(
+	ctx context.Context,
+	imageBytes []byte,
+	mimeType string,
+) (*TranslationResult, error) {
+	result := &TranslationResult{
+		Source: "failed",
+	}
+
+	if !s.gemini.IsEnabled() {
+		return result, fmt.Errorf("Gemini service not available for image identification")
+	}
+
+	geminiResult, err := s.gemini.IdentifyCardFromImage(ctx, imageBytes, mimeType)
+	if err != nil {
+		infoLog("Gemini image identification failed: %v", err)
+		metrics.TranslationDecisions.WithLabelValues("failed").Inc()
+		return result, err
+	}
+
+	// Copy results
+	result.TranslatedText = geminiResult.CardName
+	result.Candidates = geminiResult.Candidates
+	result.Source = "gemini_image"
+
+	if geminiResult.RawJapanese != "" {
+		result.OriginalText = geminiResult.RawJapanese
+	}
+
+	metrics.TranslationDecisions.WithLabelValues("gemini_image").Inc()
+
+	infoLog("Gemini image identified: %q (conf=%.2f, type=%s)",
+		geminiResult.CardName, geminiResult.Confidence, geminiResult.CardType)
+
+	return result, nil
+}
+
 // truncateText truncates text to maxLen runes with ellipsis.
 // Uses rune count instead of byte count to properly handle UTF-8 (e.g., Japanese).
 func truncateText(text string, maxLen int) string {

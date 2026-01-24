@@ -241,12 +241,13 @@ The system uses a two-tier OCR approach for card identification:
 **Japanese Card Support:**
 - Server-side OCR with `OCR_LANGUAGES=ja,en` is required for accurate Japanese card scanning
 - Client-side OCR is configured for Latin script only
+- **Gemini Vision (preferred)**: For Japanese cards, the system uses Gemini 3 Flash vision to identify cards directly from images, bypassing OCR translation issues entirely
 - Japanese cards with English names (e.g., "ピカチュウ Pikachu") can match by English text
 - Japanese-only cards rely on set code + card number matching
-- **Hybrid Translation**: For low-confidence matches, Japanese text is translated using:
+- **Hybrid Translation (fallback)**: For low-confidence matches, Japanese text is translated using:
   1. Static map (1025 Pokemon + common trainer cards)
   2. SQLite cache (avoids repeat API calls)
-  3. Gemini 3 Flash (if GOOGLE_API_KEY configured, returns candidates with confidence)
+  3. Gemini 3 Flash text (if GOOGLE_API_KEY configured)
   4. Google Cloud Translation API (fallback if Gemini unavailable or low confidence)
 
 ## External APIs
