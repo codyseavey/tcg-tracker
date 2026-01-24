@@ -256,7 +256,8 @@ jobs:
       - name: Setup directories and credentials on production
         run: |
           ssh $PROD_USER@$PROD_HOST "mkdir -p $APP_DIR/data/pokemon-tcg-data $APP_DIR/secrets"
-          ssh $PROD_USER@$PROD_HOST "ln -sf /home/cody/google-cloud-adminSvc.json $APP_DIR/secrets/gcloud.json 2>/dev/null || true"
+          # Copy credentials file (not symlink - container can't follow host symlinks)
+          ssh $PROD_USER@$PROD_HOST "cp -f /home/cody/google-cloud-adminSvc.json $APP_DIR/secrets/gcloud.json 2>/dev/null || true"
           ssh $PROD_USER@$PROD_HOST "echo 'IMAGE_TAG=${{ github.sha }}' > $APP_DIR/.env.deploy"
 
       - name: Login to GHCR on production server
