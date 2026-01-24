@@ -146,6 +146,9 @@ jobs:
       (needs.lint-backend.result == 'success' || needs.lint-backend.result == 'skipped') &&
       (needs.lint-build-frontend.result == 'success' || needs.lint-build-frontend.result == 'skipped') &&
       (needs.test-backend.result == 'success' || needs.test-backend.result == 'skipped')
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
       - name: Log in to GHCR
@@ -172,6 +175,9 @@ jobs:
       github.ref == 'refs/heads/main' &&
       (needs.lint-identifier.result == 'success' || needs.lint-identifier.result == 'skipped') &&
       (needs.test-identifier.result == 'success' || needs.test-identifier.result == 'skipped')
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
       - name: Log in to GHCR
