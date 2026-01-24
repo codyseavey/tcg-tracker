@@ -225,7 +225,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ============== DEPLOY (self-hosted for local docker access) ==============
+  # ============== DEPLOY (SSH to production server) ==============
   deploy:
     runs-on: [self-hosted, fedora]
     needs: [check-changes, build-push-app, build-push-identifier]
@@ -237,52 +237,78 @@ jobs:
       (needs.build-push-identifier.result == 'success' || needs.build-push-identifier.result == 'skipped')
     environment: production
     env:
+      PROD_HOST: "192.168.86.227"
+      PROD_USER: "cody"
       APP_DIR: "/home/cody/tcg-tracker"
       IMAGE_TAG: ${{ github.sha }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Copy deployment files
+      - name: Copy deployment files to production
         run: |
-          mkdir -p $APP_DIR/deployment
-          cp docker-compose.yml docker-compose.gpu.yml $APP_DIR/
-          cp deployment/*.service deployment/*.conf $APP_DIR/deployment/ 2>/dev/null || true
+          ssh $PROD_USER@$PROD_HOST "mkdir -p $APP_DIR/deployment"
+          scp docker-compose.yml docker-compose.gpu.yml $PROD_USER@$PROD_HOST:$APP_DIR/
+          scp deployment/*.service deployment/*.conf $PROD_USER@$PROD_HOST:$APP_DIR/deployment/ 2>/dev/null || true
 
-      - name: Ensure data directories exist
+      - name: Setup directories and credentials on production
         run: |
-          mkdir -p $APP_DIR/data/pokemon-tcg-data $APP_DIR/secrets
-          ln -sf /home/cody/google-cloud-adminSvc.json $APP_DIR/secrets/gcloud.json 2>/dev/null || true
+          ssh $PROD_USER@$PROD_HOST "mkdir -p $APP_DIR/data/pokemon-tcg-data $APP_DIR/secrets"
+          ssh $PROD_USER@$PROD_HOST "ln -sf /home/cody/google-cloud-adminSvc.json $APP_DIR/secrets/gcloud.json 2>/dev/null || true"
+          ssh $PROD_USER@$PROD_HOST "echo 'IMAGE_TAG=${{ github.sha }}' > $APP_DIR/.env.deploy"
 
-      - name: Save IMAGE_TAG
-        run: echo "IMAGE_TAG=${{ github.sha }}" > $APP_DIR/.env.deploy
-
-      - name: Deploy
+      - name: Pre-pull images on production (while old containers still running)
         run: |
-          cd $APP_DIR
-          IMAGE_TAG=${{ github.sha }} docker compose -f docker-compose.yml -f docker-compose.gpu.yml down --remove-orphans || true
-          docker rm -f tcg-backend tcg-identifier 2>/dev/null || true
-          IMAGE_TAG=${{ github.sha }} \
-            JUSTTCG_API_KEY='${{ secrets.JUSTTCG_API_KEY }}' \
-            ADMIN_KEY='${{ secrets.ADMIN_KEY }}' \
-            docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+          # Always pull app image (small, fast)
+          ssh $PROD_USER@$PROD_HOST "docker pull ghcr.io/codyseavey/tcg-tracker/app:${{ github.sha }}"
+          
+          # Only pull identifier if it changed (large image, slow pull)
+          if [ "${{ needs.check-changes.outputs.identifier }}" == "true" ] || [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "Identifier changed, pulling new image..."
+            ssh $PROD_USER@$PROD_HOST "docker pull ghcr.io/codyseavey/tcg-tracker/identifier:${{ github.sha }}"
+          else
+            echo "Identifier unchanged, using cached image"
+            # Tag the existing latest as the new SHA for compose compatibility
+            ssh $PROD_USER@$PROD_HOST "docker tag ghcr.io/codyseavey/tcg-tracker/identifier:latest ghcr.io/codyseavey/tcg-tracker/identifier:${{ github.sha }} 2>/dev/null || docker pull ghcr.io/codyseavey/tcg-tracker/identifier:${{ github.sha }}"
+          fi
+
+      - name: Deploy on production
+        run: |
+          ssh $PROD_USER@$PROD_HOST "
+            cd $APP_DIR
+            
+            # Use GPU compose (production server has NVIDIA GPU)
+            COMPOSE_FILES='-f docker-compose.yml -f docker-compose.gpu.yml'
+            
+            # Stop existing containers
+            IMAGE_TAG=${{ github.sha }} docker compose \$COMPOSE_FILES down --remove-orphans || true
+            docker rm -f tcg-backend tcg-identifier 2>/dev/null || true
+            
+            # Start new containers
+            IMAGE_TAG=${{ github.sha }} \
+              JUSTTCG_API_KEY='${{ secrets.JUSTTCG_API_KEY }}' \
+              ADMIN_KEY='${{ secrets.ADMIN_KEY }}' \
+              docker compose \$COMPOSE_FILES up -d
+          "
 
       - name: Verify health
         run: |
           sleep 5
-          cd $APP_DIR && docker compose -f docker-compose.yml -f docker-compose.gpu.yml ps
+          ssh $PROD_USER@$PROD_HOST "cd $APP_DIR && docker compose -f docker-compose.yml ps"
           for i in 1 2 3; do
-            curl -sf http://localhost:3080/health && echo " - Health OK" && break
+            ssh $PROD_USER@$PROD_HOST "curl -sf http://localhost:3080/health" && echo " - Health OK" && break
             echo "Attempt $i failed, retrying..." && sleep 3
           done
 
       - name: Setup systemd/nginx (if changed)
         if: needs.check-changes.outputs.deployment == 'true'
         run: |
-          sudo cp $APP_DIR/deployment/tcg-docker.service /etc/systemd/system/
-          sudo systemctl daemon-reload && sudo systemctl enable tcg-docker
-          sudo cp $APP_DIR/deployment/tcg.seavey.dev.conf /etc/nginx/sites-available/
-          sudo ln -sf /etc/nginx/sites-available/tcg.seavey.dev.conf /etc/nginx/sites-enabled/
-          sudo nginx -t && sudo systemctl reload nginx
+          ssh $PROD_USER@$PROD_HOST "
+            sudo cp $APP_DIR/deployment/tcg-docker.service /etc/systemd/system/
+            sudo systemctl daemon-reload && sudo systemctl enable tcg-docker
+            sudo cp $APP_DIR/deployment/tcg.seavey.dev.conf /etc/nginx/sites-available/
+            sudo ln -sf /etc/nginx/sites-available/tcg.seavey.dev.conf /etc/nginx/sites-enabled/
+            sudo nginx -t && sudo systemctl reload nginx
+          "
 
       - name: Purge Cloudflare cache
         if: needs.check-changes.outputs.frontend == 'true'
@@ -292,11 +318,11 @@ jobs:
             -H "Content-Type: application/json" \
             --data '{"hosts":["tcg.seavey.dev"]}'
 
-      - name: Clean up old images
-        run: docker image prune -af --filter 'until=168h' || true
+      - name: Clean up old images on production
+        run: ssh $PROD_USER@$PROD_HOST "docker image prune -af --filter 'until=168h'" || true
 
       - name: Summary
         run: |
           echo "=== Deployed ${{ github.sha }} ==="
           echo "URL: https://tcg.seavey.dev"
-          cd $APP_DIR && docker compose -f docker-compose.yml -f docker-compose.gpu.yml ps
+          ssh $PROD_USER@$PROD_HOST "cd $APP_DIR && docker compose -f docker-compose.yml ps"
