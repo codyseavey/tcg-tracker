@@ -1,0 +1,59 @@
+name: Mobile CI/CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/mobile.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'mobile/**'
+      - '.github/workflows/mobile.yml'
+  workflow_dispatch:
+    inputs:
+      build_apk:
+        description: 'Build release APK'
+        required: true
+        default: true
+        type: boolean
+
+jobs:
+  # ============== LINT & TEST ==============
+  lint-test:
+    runs-on: [self-hosted, fedora]
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: flutter pub get
+      - name: Analyze code
+        run: flutter analyze --no-fatal-infos
+      - name: Run tests
+        run: flutter test --coverage
+
+  # ============== BUILD APK (main branch + manual only) ==============
+  build-apk:
+    runs-on: [self-hosted, fedora]
+    needs: lint-test
+    if: |
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && inputs.build_apk)
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: flutter pub get
+      - name: Build release APK
+        run: flutter build apk --release
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-${{ github.sha }}
+          path: mobile/build/app/outputs/flutter-apk/app-release.apk
+          retention-days: 30
