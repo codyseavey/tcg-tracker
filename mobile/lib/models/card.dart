@@ -375,6 +375,7 @@ class ScanResult {
   final ScanMetadata metadata;
   final SetIconResult? setIcon;
   final MTGGroupedResult? grouped; // For MTG 2-phase selection
+  final String? ocrText; // Original OCR text for caching Japanese translations
 
   ScanResult({
     required this.cards,
@@ -383,6 +384,7 @@ class ScanResult {
     required this.metadata,
     this.setIcon,
     this.grouped,
+    this.ocrText,
   });
 
   factory ScanResult.fromJson(Map<String, dynamic> json) {
@@ -407,6 +409,8 @@ class ScanResult {
       grouped: groupedData is Map<String, dynamic>
           ? MTGGroupedResult.fromJson(groupedData)
           : null,
+      ocrText:
+          json['ocr_text'] as String?, // For Japanese card translation caching
     );
   }
 }

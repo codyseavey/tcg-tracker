@@ -25,6 +25,7 @@ type PokemonHybridService struct {
 	sets      map[string]LocalSet
 	cardIndex map[string][]int // name -> card indices for fast lookup
 	wordIndex map[string][]int // word -> card indices for full-text search
+	idIndex   map[string]int   // card ID -> card index for O(1) lookup
 	cards     []LocalPokemonCard
 	mu        sync.RWMutex
 }
@@ -221,6 +222,7 @@ func NewPokemonHybridService(dataDir string) (*PokemonHybridService, error) {
 		sets:      make(map[string]LocalSet),
 		cardIndex: make(map[string][]int),
 		wordIndex: make(map[string][]int),
+		idIndex:   make(map[string]int),
 	}
 
 	if err := service.loadData(dataDir); err != nil {
@@ -290,6 +292,9 @@ func (s *PokemonHybridService) loadData(dataDir string) error {
 
 			idx := len(s.cards)
 			s.cards = append(s.cards, cards[i])
+
+			// Index by ID for O(1) lookups
+			s.idIndex[cards[i].ID] = idx
 
 			// Index by lowercase name for search (using pre-computed field)
 			s.cardIndex[cards[i].nameLower] = append(s.cardIndex[cards[i].nameLower], idx)
@@ -561,6 +566,22 @@ func (s *PokemonHybridService) GetCardBySetAndNumber(setCode, cardNumber string)
 	}
 
 	return nil
+}
+
+// GetCardByID finds a specific card by its ID (simple lookup without price loading).
+// Used for quick lookups from cached card IDs.
+// Uses O(1) index lookup instead of linear scan.
+func (s *PokemonHybridService) GetCardByID(id string) *models.Card {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	idx, ok := s.idIndex[id]
+	if !ok {
+		return nil
+	}
+
+	card := s.convertToCard(s.cards[idx])
+	return &card
 }
 
 // SearchByPokedexNumber finds Pokemon cards by their National Pokedex number

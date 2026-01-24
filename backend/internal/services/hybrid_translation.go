@@ -146,8 +146,9 @@ func (s *HybridTranslationService) TranslateForMatching(
 				infoLog("Gemini accepted: %q → %q (conf=%.2f)",
 					truncateText(text, 30), translatedName, bestCandidate.Confidence)
 
-				// Cache with 30-day TTL
-				_ = s.cache.SetWithSource(text, translatedName, "ja", "gemini")
+				// NOTE: We no longer auto-cache here. Caching is deferred until
+				// the user confirms by adding the card to their collection.
+				// This prevents polluting the cache with incorrect translations.
 
 				metrics.TranslationDecisions.WithLabelValues("gemini").Inc()
 				result.TranslatedText = translatedName
@@ -167,8 +168,8 @@ func (s *HybridTranslationService) TranslateForMatching(
 	if s.api.IsEnabled() {
 		translated, err := s.api.Translate(ctx, text, "ja", "en")
 		if err == nil {
-			// Cache without expiry (Google Translate is reliable)
-			_ = s.cache.SetWithSource(text, translated, "ja", "google_api")
+			// NOTE: We no longer auto-cache here. Caching is deferred until
+			// the user confirms by adding the card to their collection.
 
 			metrics.TranslationDecisions.WithLabelValues("google_api").Inc()
 			result.TranslatedText = translated
@@ -268,6 +269,44 @@ func truncateText(text string, maxLen int) string {
 		return text
 	}
 	return string(runes[:maxLen]) + "..."
+}
+
+// CacheConfirmedTranslation stores a user-confirmed OCR text → card ID mapping.
+// This is called when the user adds a card to their collection, confirming
+// that the identification was correct. The mapping never expires and takes
+// precedence over Gemini/Google translations on future scans.
+//
+// Parameters:
+//   - ocrText: the original OCR text from the scan
+//   - cardName: the confirmed card's English name (for reference)
+//   - cardID: the confirmed card's database ID
+func (s *HybridTranslationService) CacheConfirmedTranslation(ocrText, cardName, cardID string) error {
+	if s.cache == nil {
+		return nil
+	}
+
+	if ocrText == "" || cardID == "" {
+		return nil // Nothing to cache
+	}
+
+	err := s.cache.SetCardID(ocrText, cardName, cardID)
+	if err != nil {
+		infoLog("Failed to cache confirmed translation: %v", err)
+		return err
+	}
+
+	infoLog("Cached confirmed translation: OCR hash → card %s (%s)", cardID, cardName)
+	return nil
+}
+
+// GetCachedCardID checks if we have a user-confirmed card ID for the given OCR text.
+// Returns the card ID and true if found, empty string and false if not.
+// This should be checked BEFORE calling TranslateForMatching for instant lookups.
+func (s *HybridTranslationService) GetCachedCardID(ocrText string) (string, bool) {
+	if s.cache == nil {
+		return "", false
+	}
+	return s.cache.GetCardID(ocrText)
 }
 
 // sortedJapaneseKeys holds Japanese keys sorted by length (longest first)

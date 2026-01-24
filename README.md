@@ -244,6 +244,7 @@ The system uses a two-tier OCR approach for card identification:
 - **Gemini Vision (preferred)**: For Japanese cards, the system uses Gemini 3 Flash vision to identify cards directly from images, bypassing OCR translation issues entirely
 - Japanese cards with English names (e.g., "ピカチュウ Pikachu") can match by English text
 - Japanese-only cards rely on set code + card number matching
+- **User-Confirmed Caching**: When adding a Japanese card to collection, the OCR text → card ID mapping is cached for instant lookups on future scans (normalized to handle OCR variations)
 - **Hybrid Translation (fallback)**: For low-confidence matches, Japanese text is translated using:
   1. Static map (1025 Pokemon + common trainer cards)
   2. SQLite cache (avoids repeat API calls)

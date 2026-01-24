@@ -40,7 +40,7 @@ func SetupRouter(scryfallService *services.ScryfallService, pokemonService *serv
 
 	// Initialize handlers
 	cardHandler := handlers.NewCardHandler(scryfallService, pokemonService, translationService)
-	collectionHandler := handlers.NewCollectionHandler(scryfallService, pokemonService, imageStorageService, snapshotService, priceWorker)
+	collectionHandler := handlers.NewCollectionHandler(scryfallService, pokemonService, imageStorageService, snapshotService, priceWorker, translationService)
 	priceHandler := handlers.NewPriceHandler(priceWorker, priceService)
 	adminHandler := handlers.NewAdminHandler(tcgPlayerSync, justTCG)
 

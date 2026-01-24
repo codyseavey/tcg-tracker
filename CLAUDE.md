@@ -308,6 +308,17 @@ When card matching confidence is below `TRANSLATION_CONFIDENCE_THRESHOLD` (defau
 
 Gemini translations are cached with 30-day TTL (model may improve), Google API translations never expire.
 
+**User-Confirmed Translation Caching:**
+When a user adds a Japanese card to their collection, the system caches the OCR text → card ID mapping:
+1. **Instant lookups**: Future scans of the same card match instantly from cache (no Gemini/translation needed)
+2. **Never expires**: User-confirmed mappings don't expire (unlike Gemini's 30-day TTL)
+3. **OCR text normalization**: Cache keys are normalized to improve hit rates across scan variations:
+   - Full-width → half-width ASCII conversion (e.g., `Ｎ` → `N`)
+   - Line sorting (OCR can return lines in different order)
+   - Whitespace collapse (multiple spaces → single space)
+   - Empty line and noise removal
+4. **Priority over translation**: Cache lookup happens before Gemini vision for instant returns
+
 Scoring reference: name_exact=1000, name_partial=500, attack=200, number=300
 
 **Performance Optimizations:**
@@ -320,7 +331,8 @@ Scoring reference: name_exact=1000, name_partial=500, attack=200, number=300
 The `PokemonHybridService` uses an inverted index for fast full-text card matching:
 
 **Index Structure:**
-- `wordIndex map[string][]int` - maps words to card indices
+- `wordIndex map[string][]int` - maps words to card indices for full-text search
+- `idIndex map[string]int` - maps card ID to card index for O(1) lookups (used by translation cache)
 - Built at startup from ~20,000 cards
 - ~13,000 unique indexed words
 - ~20MB additional memory

@@ -15,6 +15,7 @@ class ScanResultScreen extends StatefulWidget {
   final ApiService? apiService;
   final List<int>? scannedImageBytes;
   final MTGGroupedResult? grouped; // For MTG 2-phase selection
+  final String? ocrText; // For caching Japanese card translations
 
   const ScanResultScreen({
     super.key,
@@ -26,6 +27,7 @@ class ScanResultScreen extends StatefulWidget {
     this.apiService,
     this.scannedImageBytes,
     this.grouped,
+    this.ocrText,
   });
 
   @override
@@ -213,6 +215,9 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
         printing: _printing,
         scannedImageBytes: widget.scannedImageBytes,
         language: widget.scanMetadata?.detectedLanguage,
+        // Pass OCR text for caching Japanese card translations
+        // This enables instant lookup on future scans of the same card
+        ocrText: widget.ocrText,
       );
 
       if (!mounted) return;

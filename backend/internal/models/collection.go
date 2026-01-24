@@ -47,6 +47,7 @@ type AddToCollectionRequest struct {
 	Language         CardLanguage `json:"language"`
 	Notes            string       `json:"notes"`
 	ScannedImageData string       `json:"scanned_image_data,omitempty"` // base64 encoded
+	OCRText          string       `json:"ocr_text,omitempty"`           // For caching Japanese card translations
 }
 
 type UpdateCollectionRequest struct {

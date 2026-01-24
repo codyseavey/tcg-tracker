@@ -324,11 +324,11 @@ func TestTranslateJapaneseName_OCRCorrections(t *testing.T) {
 		{"Super Rod with ko instead of go", "すこいつりざお", "Super Rod", true},
 
 		// Dash normalization - OCR often reads ー as various dashes
-		{"Rocket's Sneak Attack with hyphen", "ロケット団のおね-さん", "Rocket's Sneak Attack", true},
-		{"Rocket's Sneak Attack with en dash", "ロケット団のおね–さん", "Rocket's Sneak Attack", true},
-		{"Rocket's Sneak Attack with em dash", "ロケット団のおね—さん", "Rocket's Sneak Attack", true},
-		{"Rocket's Sneak Attack with fullwidth hyphen", "ロケット団のおね－さん", "Rocket's Sneak Attack", true},
-		{"Rocket's Sneak Attack correct", "ロケット団のおねーさん", "Rocket's Sneak Attack", true},
+		{"The Rocket's Trap with hyphen", "ロケット団のおね-さん", "The Rocket's Trap", true},
+		{"The Rocket's Trap with en dash", "ロケット団のおね–さん", "The Rocket's Trap", true},
+		{"The Rocket's Trap with em dash", "ロケット団のおね—さん", "The Rocket's Trap", true},
+		{"The Rocket's Trap with fullwidth hyphen", "ロケット団のおね－さん", "The Rocket's Trap", true},
+		{"The Rocket's Trap correct", "ロケット団のおねーさん", "The Rocket's Trap", true},
 
 		// These should still not match
 		{"Random Japanese", "ランダム", "", false},

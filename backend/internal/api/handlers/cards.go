@@ -311,10 +311,12 @@ func (h *CardHandler) IdentifyCardFromImage(c *gin.Context) {
 			result, textMatches, err := h.identifyJapaneseCardFromImage(c, imageBytes, parsed, text)
 			if err == nil && result != nil && len(result.Cards) > 0 {
 				// Success with Gemini vision - return results
+				// Include ocr_text so client can send it back when confirming (for caching)
 				response := gin.H{
 					"cards":       result.Cards,
 					"total_count": result.TotalCount,
 					"has_more":    result.HasMore,
+					"ocr_text":    text, // For caching on confirmation
 					"ocr": gin.H{
 						"text":       text,
 						"lines":      ocrResult.Lines,
@@ -361,6 +363,7 @@ func (h *CardHandler) IdentifyCardFromImage(c *gin.Context) {
 	}
 
 	// Return results
+	// Include ocr_text for Japanese cards so client can send it back for caching
 	response := gin.H{
 		"cards":       result.Cards,
 		"total_count": result.TotalCount,
@@ -396,6 +399,11 @@ func (h *CardHandler) IdentifyCardFromImage(c *gin.Context) {
 		},
 	}
 
+	// Add ocr_text for Japanese cards (needed for caching on confirmation)
+	if parsed.DetectedLanguage == "Japanese" {
+		response["ocr_text"] = text
+	}
+
 	// Add grouped results for MTG 2-phase selection
 	if grouped != nil {
 		response["grouped"] = grouped
@@ -405,14 +413,38 @@ func (h *CardHandler) IdentifyCardFromImage(c *gin.Context) {
 }
 
 // identifyJapaneseCardFromImage uses Gemini vision to identify a Japanese Pokemon card
-// from an image, then searches for the card in the database.
+// from an image, then searches for the card in the database. Returns results along
+// with the OCR text for caching on confirmation.
+//
+// The flow is:
+// 1. Check cache for user-confirmed card ID (instant lookup)
+// 2. Use Gemini vision to identify the card (Pass 1)
+// 3. Search database for matches
+// 4. If low confidence, use Gemini visual comparison (Pass 2) - TODO
 func (h *CardHandler) identifyJapaneseCardFromImage(
 	c *gin.Context,
 	imageBytes []byte,
 	parsed *services.OCRResult,
 	ocrText string,
 ) (*models.CardSearchResult, []string, error) {
-	// Use Gemini vision to identify the card
+	// Priority 0: Check cache for user-confirmed card ID
+	// This gives instant lookups for cards the user has scanned before
+	if cachedCardID, found := h.translationService.GetCachedCardID(ocrText); found {
+		log.Printf("Cache hit for Japanese card: OCR → %s", cachedCardID)
+		card := h.pokemonService.GetCardByID(cachedCardID)
+		if card != nil {
+			parsed.TranslationSource = "cache"
+			return &models.CardSearchResult{
+				Cards:      []models.Card{*card},
+				TotalCount: 1,
+				HasMore:    false,
+			}, nil, nil
+		}
+		// Cache had stale card ID, continue to normal flow
+		log.Printf("Cached card ID %s not found in database, falling back to Gemini", cachedCardID)
+	}
+
+	// Use Gemini vision to identify the card (Pass 1)
 	translationResult, err := h.translationService.IdentifyFromImage(c.Request.Context(), imageBytes, "image/jpeg")
 	if err != nil {
 		return nil, nil, err
@@ -429,14 +461,16 @@ func (h *CardHandler) identifyJapaneseCardFromImage(
 
 	// Get additional hints from Gemini candidates (set code, card number)
 	var setCode, cardNumber string
+	var geminiConfidence float64
 	if len(translationResult.Candidates) > 0 {
 		candidate := translationResult.Candidates[0]
 		setCode = candidate.SetCode
 		cardNumber = candidate.CardNumber
+		geminiConfidence = candidate.Confidence
 	}
 
-	log.Printf("Gemini vision identified Japanese card: name=%q, set=%q, num=%q",
-		cardName, setCode, cardNumber)
+	log.Printf("Gemini vision identified Japanese card: name=%q, set=%q, num=%q, conf=%.2f",
+		cardName, setCode, cardNumber, geminiConfidence)
 
 	// Priority 1: If Gemini gave us set code and card number, try exact lookup
 	if setCode != "" && cardNumber != "" {
@@ -476,6 +510,10 @@ func (h *CardHandler) identifyJapaneseCardFromImage(
 		}
 
 		log.Printf("Gemini vision matched %d cards for %q", len(result.Cards), cardName)
+
+		// TODO: If geminiConfidence < 0.7 and we have multiple candidates,
+		// consider using Pass 2 (SelectBestMatch) for visual comparison.
+		// For now, we return the ranked results and let the user pick.
 	}
 
 	return result, nil, nil

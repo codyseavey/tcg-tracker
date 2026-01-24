@@ -174,6 +174,99 @@ func TestHashText(t *testing.T) {
 	}
 }
 
+func TestNormalizeOCRText(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "Full-width ASCII to half-width",
+			input:    "Ｎ　ＥＸ",
+			expected: "n ex",
+		},
+		{
+			name:     "Whitespace collapse",
+			input:    "pikachu   hp    60",
+			expected: "pikachu hp 60",
+		},
+		{
+			name:     "Empty lines removed",
+			input:    "pikachu\n\n\nhp 60",
+			expected: "hp 60\npikachu",
+		},
+		{
+			name:     "Lines sorted alphabetically",
+			input:    "hp 60\npikachu\nattack",
+			expected: "attack\nhp 60\npikachu",
+		},
+		{
+			name:     "Pure number lines removed",
+			input:    "pikachu\n123\n456",
+			expected: "pikachu",
+		},
+		{
+			name:     "Lowercase conversion",
+			input:    "PIKACHU HP 60",
+			expected: "pikachu hp 60",
+		},
+		{
+			name:     "Japanese text preserved",
+			input:    "ピカチュウ",
+			expected: "ピカチュウ",
+		},
+		{
+			name:     "Mixed Japanese and English",
+			input:    "ピカチュウ HP 60",
+			expected: "ピカチュウ hp 60",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := normalizeOCRText(tt.input)
+			if result != tt.expected {
+				t.Errorf("normalizeOCRText(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestHashText_OCRVariations(t *testing.T) {
+	// These variations of the same card scan should produce the same hash
+	// after normalization, improving cache hit rates
+
+	// Variation 1: Different line ordering (OCR can return lines in different order)
+	ocr1 := "ピカチュウ\nHP 60\n025/185"
+	ocr2 := "HP 60\nピカチュウ\n025/185"
+	hash1 := hashText(ocr1)
+	hash2 := hashText(ocr2)
+	if hash1 != hash2 {
+		t.Error("Same card with different line order should produce same hash")
+	}
+
+	// Variation 2: Extra whitespace (lighting/focus differences)
+	ocr3 := "ピカチュウ\nHP  60\n025/185"
+	hash3 := hashText(ocr3)
+	if hash1 != hash3 {
+		t.Error("Same card with extra whitespace should produce same hash")
+	}
+
+	// Variation 3: Full-width vs half-width characters
+	ocr4 := "ピカチュウ\nＨＰ　６０\n025/185"
+	hash4 := hashText(ocr4)
+	if hash1 != hash4 {
+		t.Error("Same card with full-width chars should produce same hash")
+	}
+
+	// Different cards should still produce different hashes
+	ocrDifferent := "リザードン\nHP 120\n001/185"
+	hashDifferent := hashText(ocrDifferent)
+	if hash1 == hashDifferent {
+		t.Error("Different cards should produce different hashes")
+	}
+}
+
 func TestTranslationCacheService_NilDB(t *testing.T) {
 	// Cache service with nil DB should not panic
 	svc := NewTranslationCacheService(nil)

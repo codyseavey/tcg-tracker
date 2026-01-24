@@ -1202,7 +1202,7 @@ var JapaneseToEnglishNames = map[string]string{
 	"サカキのペルシアン": "Giovanni's Persian",
 	"サカキのミュウツー": "Giovanni's Mewtwo",
 	// Rocket Cards
-	"ロケット団のおねーさん": "Rocket's Sneak Attack",
+	"ロケット団のおねーさん": "The Rocket's Trap",
 	"ロケット団のワナ":    "Rocket's Trap",
 	"ロケット団参上!":    "Here Comes Team Rocket!",
 

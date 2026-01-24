@@ -160,6 +160,7 @@ class ApiService {
     PrintingType printing = PrintingType.normal,
     List<int>? scannedImageBytes,
     String? language, // e.g., "Japanese", "English", "German"
+    String? ocrText, // OCR text for caching Japanese card translations
   }) async {
     final serverUrl = await getServerUrl();
     final uri = Uri.parse('$serverUrl/api/collection');
@@ -179,6 +180,12 @@ class ApiService {
     // Include scanned image if provided
     if (scannedImageBytes != null && scannedImageBytes.isNotEmpty) {
       body['scanned_image_data'] = base64Encode(scannedImageBytes);
+    }
+
+    // Include OCR text for caching Japanese card translations
+    // This allows instant lookup on future scans of the same card
+    if (ocrText != null && ocrText.isNotEmpty) {
+      body['ocr_text'] = ocrText;
     }
 
     // Get auth headers for protected endpoint
@@ -467,18 +474,22 @@ class ApiService {
     }
   }
 
-  /// Downscale image to max dimension while preserving aspect ratio
-  /// Returns JPEG-encoded bytes
+  /// Downscale image to max dimension while preserving aspect ratio.
+  /// Returns the original bytes if already small enough to avoid lossy re-compression.
+  /// When resizing is needed, uses high quality (95) to preserve text clarity for OCR.
   Uint8List _downscaleImage(List<int> imageBytes) {
     final image = img.decodeImage(Uint8List.fromList(imageBytes));
     if (image == null) {
+      // Can't decode, return original bytes and let server handle it
       return Uint8List.fromList(imageBytes);
     }
 
     final maxDim = max(image.width, image.height);
     if (maxDim <= _maxImageDimension) {
-      // Already small enough, just return as JPEG
-      return Uint8List.fromList(img.encodeJpg(image, quality: 85));
+      // Already small enough - return ORIGINAL bytes to avoid lossy re-compression.
+      // Each JPEG encode/decode cycle degrades quality, especially for text edges
+      // which are critical for OCR accuracy.
+      return Uint8List.fromList(imageBytes);
     }
 
     // Calculate new dimensions
@@ -486,9 +497,10 @@ class ApiService {
     final newWidth = (image.width * scale).round();
     final newHeight = (image.height * scale).round();
 
-    // Resize and encode as JPEG
+    // Resize and encode as JPEG with HIGH quality (95) to preserve text clarity.
+    // Lower quality causes JPEG artifacts that degrade OCR accuracy.
     final resized = img.copyResize(image, width: newWidth, height: newHeight);
-    return Uint8List.fromList(img.encodeJpg(resized, quality: 85));
+    return Uint8List.fromList(img.encodeJpg(resized, quality: 95));
   }
 
   /// Identify card from an image using server-side OCR
