@@ -681,6 +681,140 @@ func BenchmarkMatchByFullText_PoorOCR(b *testing.B) {
 	}
 }
 
+// TestMatchByFullText_ShortCardNames tests that short card names like "N" don't match everything
+func TestMatchByFullText_ShortCardNames(t *testing.T) {
+	dataDir := getTestDataDir()
+	if dataDir == "" {
+		t.Skip("Pokemon TCG data not found, skipping integration test")
+	}
+
+	service, err := NewPokemonHybridService(dataDir)
+	if err != nil {
+		t.Fatalf("Failed to initialize PokemonHybridService: %v", err)
+	}
+
+	// Test cases where short names should NOT match (they contain the letter but not as a word)
+	tests := []struct {
+		name        string
+		ocrText     string
+		shouldNotBe string // Card name that should NOT be in top results
+		shouldBe    string // Card name that SHOULD be in top results
+	}{
+		{
+			name: "Pikachu should not match 'N' card just because it contains letter n",
+			ocrText: `Pikachu
+HP 60
+Thunderbolt 50
+Discard all Energy cards attached to Pikachu in order to use this attack
+Quick Attack 10+
+Flip a coin. If heads, this attack does 10 damage plus 20 more damage`,
+			shouldNotBe: "N",
+			shouldBe:    "Pikachu",
+		},
+		{
+			name: "Charizard should not match 'N' card",
+			ocrText: `Charizard
+HP 120
+Energy Burn
+Fire Spin 100
+Discard 2 Energy cards attached to Charizard`,
+			shouldNotBe: "N",
+			shouldBe:    "Charizard",
+		},
+		{
+			name: "Random text with n's should not match 'N' card",
+			ocrText: `Alakazam
+HP 80
+Damage Swap
+As often as you like during your turn`,
+			shouldNotBe: "N",
+			shouldBe:    "Alakazam",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, _ := service.MatchByFullText(tt.ocrText, nil)
+
+			if result == nil || len(result.Cards) == 0 {
+				t.Errorf("MatchByFullText returned no results")
+				return
+			}
+
+			// Check that the short card name is NOT in top 3 results
+			for i := 0; i < 3 && i < len(result.Cards); i++ {
+				if result.Cards[i].Name == tt.shouldNotBe {
+					t.Errorf("Card %q incorrectly matched in top 3 results at position %d for OCR text containing the name %q",
+						tt.shouldNotBe, i+1, tt.shouldBe)
+				}
+			}
+
+			// Check that the expected card IS in top 3 results
+			found := false
+			for i := 0; i < 3 && i < len(result.Cards); i++ {
+				if strings.Contains(strings.ToLower(result.Cards[i].Name), strings.ToLower(tt.shouldBe)) {
+					found = true
+					t.Logf("✓ Found expected card %q at position %d", tt.shouldBe, i+1)
+					break
+				}
+			}
+
+			if !found {
+				t.Errorf("Expected card %q not found in top 3 results", tt.shouldBe)
+				t.Logf("Top 3 results:")
+				for i := 0; i < 3 && i < len(result.Cards); i++ {
+					t.Logf("  %d. %s (%s)", i+1, result.Cards[i].Name, result.Cards[i].ID)
+				}
+			}
+		})
+	}
+}
+
+// TestMatchByFullText_ShortNameActualMatch tests that short card names DO match when the word appears
+func TestMatchByFullText_ShortNameActualMatch(t *testing.T) {
+	dataDir := getTestDataDir()
+	if dataDir == "" {
+		t.Skip("Pokemon TCG data not found, skipping integration test")
+	}
+
+	service, err := NewPokemonHybridService(dataDir)
+	if err != nil {
+		t.Fatalf("Failed to initialize PokemonHybridService: %v", err)
+	}
+
+	// When "N" actually appears as a word in OCR text, it SHOULD match the N card
+	ocrText := `N
+Supporter
+Each player shuffles his or her hand into his or her deck
+Then each player draws a card for each of his or her remaining Prize cards
+101/101`
+
+	result, _ := service.MatchByFullText(ocrText, nil)
+
+	if result == nil || len(result.Cards) == 0 {
+		t.Errorf("MatchByFullText returned no results for N card OCR")
+		return
+	}
+
+	// Check that "N" card IS in top results
+	found := false
+	for i := 0; i < 5 && i < len(result.Cards); i++ {
+		if result.Cards[i].Name == "N" {
+			found = true
+			t.Logf("✓ Found N card at position %d (%s)", i+1, result.Cards[i].ID)
+			break
+		}
+	}
+
+	if !found {
+		t.Errorf("N card should be found when 'N' appears as a word in OCR text")
+		t.Logf("Top 5 results:")
+		for i := 0; i < 5 && i < len(result.Cards); i++ {
+			t.Logf("  %d. %s (%s)", i+1, result.Cards[i].Name, result.Cards[i].ID)
+		}
+	}
+}
+
 // BenchmarkMatchByFullText_WithSetFilter benchmarks with set filtering
 func BenchmarkMatchByFullText_WithSetFilter(b *testing.B) {
 	dataDir := getTestDataDir()

@@ -142,6 +142,26 @@ func countWordMatches(ocrWords []string, cardText string) int {
 	return count
 }
 
+// matchShortNameAsWord checks if a short name (1-2 chars) appears as a standalone word in text
+// This prevents "N" from matching any text containing the letter "n"
+// Returns true only if the name appears with word boundaries (spaces, punctuation, start/end)
+func matchShortNameAsWord(text, shortName string) bool {
+	if len(shortName) == 0 {
+		return false
+	}
+
+	// Split text into words (preserving all words, not filtering by length)
+	words := strings.Fields(text)
+	for _, word := range words {
+		// Clean punctuation from word for comparison
+		cleaned := strings.Trim(word, ".,!?\"'();:-/")
+		if cleaned == shortName {
+			return true
+		}
+	}
+	return false
+}
+
 // normalizeWordForIndex normalizes a word for indexing
 // Handles common OCR errors and returns empty string if word should be skipped
 func normalizeWordForIndex(word string) string {
@@ -796,7 +816,19 @@ func (s *PokemonHybridService) scoreCard(localCard *LocalPokemonCard, ocrLower s
 	matched := []string{}
 
 	// Name match (highest priority) - using pre-computed lowercase
-	if strings.Contains(ocrLower, localCard.nameLower) {
+	// For very short names (<=2 chars like "N"), require word boundary match
+	// to avoid matching any text containing the letter (e.g., "Pikachu" has "n")
+	nameMatched := false
+	if len(localCard.nameLower) <= 2 {
+		// Short name: must match as a standalone word using word boundaries
+		// Check against raw OCR words (including short ones, not the filtered ocrWords)
+		nameMatched = matchShortNameAsWord(ocrLower, localCard.nameLower)
+	} else {
+		// Normal length name: substring match is fine
+		nameMatched = strings.Contains(ocrLower, localCard.nameLower)
+	}
+
+	if nameMatched {
 		score += 1000
 		matched = append(matched, "name")
 	} else {
