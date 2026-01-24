@@ -1067,7 +1067,7 @@ var JapaneseToEnglishNames = map[string]string{
 	"ポケモン回収":       "Scoop Up",
 	"ディフェンダー":      "Defender",
 	"エネルギー回収":      "Energy Retrieval",
-	"エネルギーサーキュレート": "Energy Circulator",
+	"エネルギーサーキュレート": "Energy Flow",
 	"博士の研究":        "Professor's Research",
 	"ボスの指令":        "Boss's Orders",
 	"ナンジャモ":        "Iono",

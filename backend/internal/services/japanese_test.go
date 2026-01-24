@@ -129,12 +129,12 @@ func TestRealJapaneseOCR(t *testing.T) {
 			wantLanguage: "Japanese",
 		},
 		{
-			name: "Energy Circulator - real OCR",
+			name: "Energy Flow - real OCR",
 			ocr: `TBRWG
 エネルギーサーキュレート
 あなたの場のポケモンについてい
 「基本エネルギーカード」 を`,
-			wantCardName: "Energy Circulator",
+			wantCardName: "Energy Flow",
 			wantLanguage: "Japanese",
 		},
 		{
@@ -196,6 +196,109 @@ func TestTranslateJapaneseName(t *testing.T) {
 			}
 			if english != tt.english {
 				t.Errorf("english = %q, want %q", english, tt.english)
+			}
+		})
+	}
+}
+
+// TestActualOCRFromImages tests with the EXACT OCR output from the 4 test images.
+// These are the raw lines captured by running the identifier service on real card images.
+func TestActualOCRFromImages(t *testing.T) {
+	tests := []struct {
+		name         string
+		ocr          string
+		wantCardName string
+		wantLanguage string
+		wantPokedex  int
+	}{
+		{
+			name: "Professor Elm - actual OCR from 84f402e1.jpeg",
+			ocr: `明心町
+ウツギはかせ
+|
+|
+巻フ枚引いて: 手札にする。
+|
+|
+かできない。
+|`,
+			wantCardName: "Professor Elm",
+			wantLanguage: "Japanese",
+		},
+		{
+			name: "Energy Flow - actual OCR from c10c0d05.jpeg",
+			ocr: `町心町
+エネルギーサーキュレート
+|
+「基本エネルギーカード」 を
+る
+好きなだけはがし、 手札に戻して
+よい。
+|`,
+			wantCardName: "Energy Flow",
+			wantLanguage: "Japanese",
+		},
+		{
+			name: "Super Rod - actual OCR from 7bfcc556.jpeg with ko instead of go",
+			ocr: `|
+丁町
+すこいつりざお
+コインを投げて 「おもて」 なら
+「進化カード」 を 「うら」なら
+「たねボケモン」 を1枚 あなた
+1
+に加える。
+1`,
+			wantCardName: "Super Rod", // Should match via OCR correction こ→ご
+			wantLanguage: "Japanese",
+		},
+		{
+			name: "Nidoran male - actual OCR from e8b0852a.jpeg",
+			ocr: `{
+;
+7
+|
+Zollvp
+1
+に
+ニドラン』
+HPAO
+o7n
+身長05m 体重gKg
+とくばりボケモン
+つのでつつく
+30
+コインを投げて 「うら」 なら 相手に
+ダメージをあたえることができない。
+にげる
+耳が大きく、 通くの音
+@
+耳がば
+爾点
+'
+と角バりなだす。
+|
+Na 092`,
+			wantCardName: "Nidoran ♂", // Should match via corrupted gender symbol handling
+			wantLanguage: "Japanese",
+			wantPokedex:  92, // OCR corrupted 032 to 092
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := ParseOCRText(tt.ocr, "pokemon")
+
+			if tt.wantCardName != "" && result.CardName != tt.wantCardName {
+				t.Errorf("CardName = %q, want %q", result.CardName, tt.wantCardName)
+			}
+
+			if tt.wantLanguage != "" && result.DetectedLanguage != tt.wantLanguage {
+				t.Errorf("DetectedLanguage = %q, want %q", result.DetectedLanguage, tt.wantLanguage)
+			}
+
+			if tt.wantPokedex != 0 && result.PokedexNumber != tt.wantPokedex {
+				t.Errorf("PokedexNumber = %d, want %d", result.PokedexNumber, tt.wantPokedex)
 			}
 		})
 	}

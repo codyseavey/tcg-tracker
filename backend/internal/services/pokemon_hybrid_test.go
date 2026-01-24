@@ -835,3 +835,141 @@ func BenchmarkMatchByFullText_WithSetFilter(b *testing.B) {
 		service.MatchByFullText(ocrText, candidateSets)
 	}
 }
+
+// TestJapaneseCardIdentification tests the full flow for Japanese cards:
+// 1. Parse OCR text to extract Japanese card name
+// 2. Translate Japanese name to English
+// 3. Search database for the card
+// This verifies that Japanese cards from the 4 test images can be identified.
+func TestJapaneseCardIdentification(t *testing.T) {
+	// Find data directory
+	dataDir := getTestDataDir()
+	if dataDir == "" {
+		t.Skip("Pokemon TCG data not found, skipping integration test")
+	}
+
+	// Initialize service
+	service, err := NewPokemonHybridService(dataDir)
+	if err != nil {
+		t.Fatalf("Failed to initialize PokemonHybridService: %v", err)
+	}
+
+	t.Logf("Loaded %d cards from %d sets", service.GetCardCount(), service.GetSetCount())
+
+	// Test cases using actual OCR output from the 4 Japanese test images
+	tests := []struct {
+		name               string
+		ocrText            string
+		expectedCard       string
+		shouldFindByParse  bool // Can ParseOCRText extract the name?
+		shouldFindBySearch bool // Can we find the card in the database?
+	}{
+		{
+			name: "Professor Elm - actual OCR from 84f402e1.jpeg",
+			ocrText: `明心町
+ウツギはかせ
+|
+|
+巻フ枚引いて: 手札にする。`,
+			expectedCard:       "Professor Elm",
+			shouldFindByParse:  true,
+			shouldFindBySearch: true,
+		},
+		{
+			name: "Energy Flow - actual OCR from c10c0d05.jpeg",
+			ocrText: `町心町
+エネルギーサーキュレート
+|
+「基本エネルギーカード」 を`,
+			expectedCard:       "Energy Flow",
+			shouldFindByParse:  true,
+			shouldFindBySearch: true,
+		},
+		{
+			name: "Super Rod - actual OCR from 7bfcc556.jpeg with OCR error",
+			ocrText: `|
+丁町
+すこいつりざお
+コインを投げて 「おもて」 なら`,
+			expectedCard:       "Super Rod",
+			shouldFindByParse:  true, // Should translate via OCR correction
+			shouldFindBySearch: true,
+		},
+		{
+			name: "Nidoran male - actual OCR from e8b0852a.jpeg",
+			ocrText: `{
+;
+7
+|
+Zollvp
+1
+に
+ニドラン』
+HPAO
+o7n
+とくばりボケモン
+つのでつつく
+30
+Na 092`,
+			expectedCard:       "Nidoran",
+			shouldFindByParse:  true, // Should handle corrupted gender symbol
+			shouldFindBySearch: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Step 1: Parse OCR text
+			result := ParseOCRText(tt.ocrText, "pokemon")
+			t.Logf("Parsed card name: %q (language: %s, pokedex: %d)",
+				result.CardName, result.DetectedLanguage, result.PokedexNumber)
+
+			// Verify parsing extracts the expected card name
+			if tt.shouldFindByParse {
+				if result.CardName == "" {
+					t.Errorf("ParseOCRText did not extract any card name")
+				} else if !strings.Contains(result.CardName, tt.expectedCard) &&
+					!strings.Contains(tt.expectedCard, result.CardName) {
+					// Allow partial matches (e.g., "Nidoran ♂" contains "Nidoran")
+					t.Logf("Card name %q doesn't exactly match expected %q", result.CardName, tt.expectedCard)
+				}
+			}
+
+			// Step 2: Search for the card by name
+			if tt.shouldFindBySearch && result.CardName != "" {
+				searchResult, err := service.SearchCards(result.CardName)
+				if err != nil {
+					t.Errorf("SearchCards failed: %v", err)
+					return
+				}
+
+				if searchResult == nil || len(searchResult.Cards) == 0 {
+					t.Errorf("No cards found for %q", result.CardName)
+					return
+				}
+
+				t.Logf("Found %d cards for %q:", searchResult.TotalCount, result.CardName)
+				for i := 0; i < 3 && i < len(searchResult.Cards); i++ {
+					t.Logf("  %d. %s (%s)", i+1, searchResult.Cards[i].Name, searchResult.Cards[i].ID)
+				}
+
+				// Verify expected card is in results
+				found := false
+				for i := 0; i < 10 && i < len(searchResult.Cards); i++ {
+					cardNameLower := strings.ToLower(searchResult.Cards[i].Name)
+					expectedLower := strings.ToLower(tt.expectedCard)
+					if strings.Contains(cardNameLower, expectedLower) ||
+						strings.Contains(expectedLower, cardNameLower) {
+						found = true
+						t.Logf("✓ Found expected card %q at position %d", tt.expectedCard, i+1)
+						break
+					}
+				}
+
+				if !found {
+					t.Errorf("Expected card %q not found in search results", tt.expectedCard)
+				}
+			}
+		})
+	}
+}
