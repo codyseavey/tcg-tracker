@@ -2,7 +2,7 @@ package services
 
 import (
 	"context"
-	"log"
+	"fmt"
 	"os"
 	"sort"
 	"strconv"
@@ -19,9 +19,18 @@ const (
 	DefaultConfidenceThreshold = 800
 )
 
-// HybridTranslationService orchestrates static translation, caching, and API calls
+// TranslationResult contains the full translation result with metadata
+type TranslationResult struct {
+	OriginalText   string            // Original Japanese text
+	TranslatedText string            // Best translated text
+	Source         string            // "static", "cache", "gemini", "google_api", "failed", "skipped"
+	Candidates     []GeminiCandidate // All candidates from Gemini (if used)
+}
+
+// HybridTranslationService orchestrates static translation, Gemini, caching, and Google API
 type HybridTranslationService struct {
 	cache               *TranslationCacheService
+	gemini              *GeminiTranslationService
 	api                 *TranslationService
 	confidenceThreshold int
 }
@@ -37,19 +46,25 @@ func NewHybridTranslationService(db *gorm.DB) *HybridTranslationService {
 
 	svc := &HybridTranslationService{
 		cache:               NewTranslationCacheService(db),
+		gemini:              NewGeminiTranslationService(),
 		api:                 NewTranslationService(),
 		confidenceThreshold: threshold,
 	}
 
-	log.Printf("Hybrid translation service initialized: threshold=%d, api_enabled=%v",
-		threshold, svc.api.IsEnabled())
+	infoLog("Hybrid translation service initialized: threshold=%d, gemini=%v, google_api=%v",
+		threshold, svc.gemini.IsEnabled(), svc.api.IsEnabled())
 
 	return svc
 }
 
-// IsAPIEnabled returns whether the translation API is available
+// IsAPIEnabled returns whether any translation API is available
 func (s *HybridTranslationService) IsAPIEnabled() bool {
-	return s.api.IsEnabled()
+	return s.gemini.IsEnabled() || s.api.IsEnabled()
+}
+
+// IsGeminiEnabled returns whether Gemini translation is available
+func (s *HybridTranslationService) IsGeminiEnabled() bool {
+	return s.gemini.IsEnabled()
 }
 
 // GetConfidenceThreshold returns the current confidence threshold
@@ -63,57 +78,156 @@ func (s *HybridTranslationService) GetConfidenceThreshold() int {
 // 2. If language is not Japanese, return original text
 // 3. Apply static map translation
 // 4. Check translation cache
-// 5. Call translation API if cache miss
-// 6. Cache the result
+// 5. Try Gemini 3 Flash (returns candidates with confidence)
+// 6. If Gemini confidence < 60%, also try Google Translate
+// 7. Return all candidates for user selection
 //
-// Returns: translated text, whether API was used, error (if any)
+// Returns: TranslationResult with candidates, error (if all methods fail)
 func (s *HybridTranslationService) TranslateForMatching(
 	ctx context.Context,
 	text string,
 	detectedLanguage string,
 	currentScore int,
-) (string, bool, error) {
+) (*TranslationResult, error) {
+	result := &TranslationResult{
+		OriginalText: text,
+		Source:       "skipped",
+	}
+
 	// Check if translation is needed based on confidence score
 	if currentScore >= s.confidenceThreshold {
-		return text, false, nil
+		debugLog("Skipping translation: score %d >= threshold %d", currentScore, s.confidenceThreshold)
+		result.TranslatedText = text
+		metrics.TranslationDecisions.WithLabelValues("skipped").Inc()
+		return result, nil
 	}
 
 	// Only translate Japanese text
 	if detectedLanguage != "Japanese" {
-		return text, false, nil
+		result.TranslatedText = text
+		return result, nil
 	}
+
+	infoLog("Translation triggered: score=%d < threshold=%d, text=%q",
+		currentScore, s.confidenceThreshold, truncateText(text, 50))
 
 	// Step 1: Apply static map translation first
 	staticTranslated := TranslateTextWithStaticMap(text)
 	if staticTranslated != text {
+		debugLog("Static map hit")
 		metrics.TranslationRequestsTotal.WithLabelValues("static").Inc()
+		metrics.TranslationDecisions.WithLabelValues("static").Inc()
+		result.TranslatedText = staticTranslated
+		result.Source = "static"
+		return result, nil
 	}
 
-	// If API is not enabled, return static translation result
-	if !s.api.IsEnabled() {
-		return staticTranslated, false, nil
-	}
-
-	// Step 2: Check translation cache (using original text as key)
+	// Step 2: Check translation cache
 	if cached, found := s.cache.Get(text); found {
-		return cached, false, nil
+		debugLog("Cache hit")
+		metrics.TranslationDecisions.WithLabelValues("cache").Inc()
+		result.TranslatedText = cached
+		result.Source = "cache"
+		return result, nil
 	}
 
-	// Step 3: Call translation API
-	translated, err := s.api.Translate(ctx, text, "ja", "en")
-	if err != nil {
-		log.Printf("Translation API error (returning static result): %v", err)
-		// Return static translation on API error
-		return staticTranslated, false, err
+	// Step 3: Try Gemini 3 Flash (structured output with candidates)
+	var geminiResult *GeminiCardResponse
+	if s.gemini.IsEnabled() {
+		var err error
+		geminiResult, err = s.gemini.IdentifyCard(ctx, text)
+		if err == nil && len(geminiResult.Candidates) > 0 {
+			bestCandidate := geminiResult.Candidates[0]
+			result.Candidates = geminiResult.Candidates
+
+			// If confidence >= 60%, accept Gemini result
+			if bestCandidate.Confidence >= MinGeminiConfidence {
+				translatedName := bestCandidate.BuildFullName()
+				infoLog("Gemini accepted: %q → %q (conf=%.2f)",
+					truncateText(text, 30), translatedName, bestCandidate.Confidence)
+
+				// Cache with 30-day TTL
+				_ = s.cache.SetWithSource(text, translatedName, "ja", "gemini")
+
+				metrics.TranslationDecisions.WithLabelValues("gemini").Inc()
+				result.TranslatedText = translatedName
+				result.Source = "gemini"
+				return result, nil
+			}
+
+			// Low confidence - log and continue to Google Translate
+			infoLog("Gemini low confidence (%.2f < %.2f), trying Google Translate",
+				bestCandidate.Confidence, MinGeminiConfidence)
+		} else if err != nil {
+			infoLog("Gemini error: %v", err)
+		}
 	}
 
-	// Step 4: Cache the result
-	if err := s.cache.Set(text, translated, "ja"); err != nil {
-		log.Printf("Failed to cache translation: %v", err)
-		// Don't fail the request, just log
+	// Step 4: Fall back to Google Cloud Translation API
+	if s.api.IsEnabled() {
+		translated, err := s.api.Translate(ctx, text, "ja", "en")
+		if err == nil {
+			// Cache without expiry (Google Translate is reliable)
+			_ = s.cache.SetWithSource(text, translated, "ja", "google_api")
+
+			metrics.TranslationDecisions.WithLabelValues("google_api").Inc()
+			result.TranslatedText = translated
+			result.Source = "google_api"
+
+			// If we have Gemini candidates, add Google's translation as another candidate
+			if geminiResult != nil && len(result.Candidates) > 0 {
+				result.Candidates = append(result.Candidates, GeminiCandidate{
+					CardName:   translated,
+					Confidence: 0.5, // Moderate confidence for literal translation
+					Reasoning:  "Google Cloud Translation literal translation",
+				})
+			}
+
+			infoLog("Google Translate success: %q → %q", truncateText(text, 30), translated)
+			return result, nil
+		}
+		infoLog("Google API error: %v", err)
 	}
 
-	return translated, true, nil
+	// All methods failed
+	metrics.TranslationDecisions.WithLabelValues("failed").Inc()
+	result.TranslatedText = text
+	result.Source = "failed"
+
+	// If we have any Gemini candidates (even low confidence), still return them
+	if geminiResult != nil && len(geminiResult.Candidates) > 0 {
+		result.TranslatedText = geminiResult.BestGuess
+		result.Candidates = geminiResult.Candidates
+		infoLog("Using low-confidence Gemini result as fallback: %q", geminiResult.BestGuess)
+	}
+
+	return result, fmt.Errorf("all translation methods failed")
+}
+
+// TranslateForMatchingLegacy is the old interface for backwards compatibility.
+// Returns: translated text, whether API was used, error (if any)
+func (s *HybridTranslationService) TranslateForMatchingLegacy(
+	ctx context.Context,
+	text string,
+	detectedLanguage string,
+	currentScore int,
+) (string, bool, error) {
+	result, err := s.TranslateForMatching(ctx, text, detectedLanguage, currentScore)
+	if result == nil {
+		return text, false, err
+	}
+	apiUsed := result.Source == "gemini" || result.Source == "google_api"
+	return result.TranslatedText, apiUsed, err
+}
+
+// truncateText truncates text to maxLen runes with ellipsis.
+// Uses rune count instead of byte count to properly handle UTF-8 (e.g., Japanese).
+func truncateText(text string, maxLen int) string {
+	runes := []rune(text)
+	if len(runes) <= maxLen {
+		return text
+	}
+	return string(runes[:maxLen]) + "..."
 }
 
 // sortedJapaneseKeys holds Japanese keys sorted by length (longest first)

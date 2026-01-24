@@ -92,16 +92,16 @@ func TestHybridTranslationService_SkipsHighConfidence(t *testing.T) {
 
 	// High confidence score should return original text without translation
 	text := "ピカチュウ HP 60"
-	result, usedAPI, err := svc.TranslateForMatching(ctx, text, "Japanese", 900)
+	result, err := svc.TranslateForMatching(ctx, text, "Japanese", 900)
 
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	if usedAPI {
-		t.Error("Expected usedAPI to be false for high confidence score")
+	if result.Source != "skipped" {
+		t.Errorf("Expected source to be 'skipped' for high confidence score, got %q", result.Source)
 	}
-	if result != text {
-		t.Errorf("Expected original text for high confidence, got %q", result)
+	if result.TranslatedText != text {
+		t.Errorf("Expected original text for high confidence, got %q", result.TranslatedText)
 	}
 }
 
@@ -116,16 +116,16 @@ func TestHybridTranslationService_SkipsNonJapanese(t *testing.T) {
 
 	// Non-Japanese language should return original text
 	text := "Pikachu HP 60"
-	result, usedAPI, err := svc.TranslateForMatching(ctx, text, "English", 100)
+	result, err := svc.TranslateForMatching(ctx, text, "English", 100)
 
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	if usedAPI {
-		t.Error("Expected usedAPI to be false for non-Japanese text")
+	if result.Source != "skipped" {
+		t.Errorf("Expected source to be 'skipped' for non-Japanese text, got %q", result.Source)
 	}
-	if result != text {
-		t.Errorf("Expected original text for English, got %q", result)
+	if result.TranslatedText != text {
+		t.Errorf("Expected original text for English, got %q", result.TranslatedText)
 	}
 }
 
@@ -140,14 +140,17 @@ func TestHybridTranslationService_UsesStaticMapWhenAPIDisabled(t *testing.T) {
 
 	// Low confidence Japanese text should use static map when API is disabled
 	text := "ピカチュウ HP 60"
-	result, usedAPI, _ := svc.TranslateForMatching(ctx, text, "Japanese", 100)
+	result, err := svc.TranslateForMatching(ctx, text, "Japanese", 100)
 
-	if usedAPI {
-		t.Error("Expected usedAPI to be false when API is disabled")
+	if err != nil {
+		t.Errorf("Unexpected error: %v", err)
+	}
+	if result.Source != "static" {
+		t.Errorf("Expected source to be 'static' when API is disabled, got %q", result.Source)
 	}
 	// Should have static translation applied
-	if result != "Pikachu HP 60" {
-		t.Errorf("Expected static translation 'Pikachu HP 60', got %q", result)
+	if result.TranslatedText != "Pikachu HP 60" {
+		t.Errorf("Expected static translation 'Pikachu HP 60', got %q", result.TranslatedText)
 	}
 }
 
@@ -194,5 +197,72 @@ func TestTranslationCacheService_NilDB(t *testing.T) {
 	entries, hits := svc.GetStats()
 	if entries != 0 || hits != 0 {
 		t.Errorf("Expected (0, 0) stats with nil DB, got (%d, %d)", entries, hits)
+	}
+}
+
+func TestTruncateText(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		maxLen   int
+		expected string
+	}{
+		{
+			name:     "ASCII under limit",
+			input:    "hello",
+			maxLen:   10,
+			expected: "hello",
+		},
+		{
+			name:     "ASCII at limit",
+			input:    "hello",
+			maxLen:   5,
+			expected: "hello",
+		},
+		{
+			name:     "ASCII over limit",
+			input:    "hello world",
+			maxLen:   5,
+			expected: "hello...",
+		},
+		{
+			name:     "Japanese under limit",
+			input:    "ピカチュウ",
+			maxLen:   10,
+			expected: "ピカチュウ",
+		},
+		{
+			name:     "Japanese at limit",
+			input:    "ピカチュウ",
+			maxLen:   5,
+			expected: "ピカチュウ",
+		},
+		{
+			name:     "Japanese over limit - truncates by rune not byte",
+			input:    "ピカチュウリザードン",
+			maxLen:   5,
+			expected: "ピカチュウ...",
+		},
+		{
+			name:     "Mixed Japanese/English",
+			input:    "ピカチュウ HP 60",
+			maxLen:   7,
+			expected: "ピカチュウ H...",
+		},
+		{
+			name:     "Empty string",
+			input:    "",
+			maxLen:   10,
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := truncateText(tt.input, tt.maxLen)
+			if result != tt.expected {
+				t.Errorf("truncateText(%q, %d) = %q, want %q", tt.input, tt.maxLen, result, tt.expected)
+			}
+		})
 	}
 }

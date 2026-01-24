@@ -21,6 +21,10 @@ const props = defineProps({
   availableRarities: {
     type: Array,
     default: () => []
+  },
+  availableLanguages: {
+    type: Array,
+    default: () => []
   }
 })
 
@@ -35,7 +39,8 @@ const activeCount = computed(() => {
   return (f.printings?.length || 0) +
          (f.sets?.length || 0) +
          (f.conditions?.length || 0) +
-         (f.rarities?.length || 0)
+         (f.rarities?.length || 0) +
+         (f.languages?.length || 0)
 })
 
 // Filter sets by search query
@@ -75,7 +80,8 @@ const clearAll = () => {
     printings: [],
     sets: [],
     conditions: [],
-    rarities: []
+    rarities: [],
+    languages: []
   })
   setSearch.value = ''
 }
@@ -93,6 +99,20 @@ const conditionLabels = {
 
 const getConditionLabel = (condition) => {
   return conditionLabels[condition] || condition
+}
+
+// Language flags for display
+const languageFlags = {
+  'English': '🇺🇸',
+  'Japanese': '🇯🇵',
+  'German': '🇩🇪',
+  'French': '🇫🇷',
+  'Italian': '🇮🇹'
+}
+
+const getLanguageDisplay = (language) => {
+  const flag = languageFlags[language] || ''
+  return flag ? `${flag} ${language}` : language
 }
 </script>
 
@@ -206,6 +226,24 @@ const getConditionLabel = (condition) => {
               :title="getConditionLabel(condition)"
             >
               {{ condition }}
+            </button>
+          </div>
+        </div>
+
+        <!-- Language Filter -->
+        <div v-if="availableLanguages.length > 0" class="space-y-2">
+          <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Language</label>
+          <div class="flex flex-wrap gap-2">
+            <button
+              v-for="language in availableLanguages"
+              :key="language"
+              @click="toggle('languages', language)"
+              class="px-3 py-1.5 text-sm rounded-full border transition-colors"
+              :class="isSelected('languages', language)
+                ? 'bg-blue-600 border-blue-600 text-white'
+                : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:border-blue-400 dark:hover:border-blue-500'"
+            >
+              {{ getLanguageDisplay(language) }}
             </button>
           </div>
         </div>

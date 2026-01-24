@@ -856,13 +856,23 @@ func TestJapaneseCardIdentification(t *testing.T) {
 
 	t.Logf("Loaded %d cards from %d sets", service.GetCardCount(), service.GetSetCount())
 
-	// Test cases using actual OCR output from the 4 Japanese test images
+	// Test cases using actual OCR output from the 4 Japanese test images.
+	// These test cards are vintage Japanese cards from:
+	// - Professor Elm: neo1-96 (Neo Genesis)
+	// - Energy Flow: gym1-122 (Gym Heroes)
+	// - Super Rod: neo1-103 (Neo Genesis)
+	// - Nidoran ♂: base1-55 (Base Set, LV.20 HP40)
+	//
+	// NOTE: Vintage Japanese cards don't have visible set codes or collector numbers,
+	// so we can only verify name matching (not exact card ID). The goal is to ensure
+	// the correct card NAME is identified and found in the database.
 	tests := []struct {
 		name               string
 		ocrText            string
-		expectedCard       string
-		shouldFindByParse  bool // Can ParseOCRText extract the name?
-		shouldFindBySearch bool // Can we find the card in the database?
+		expectedCardName   string   // The English card name we expect to extract
+		expectedCardIDs    []string // Acceptable card IDs (any printing of this card)
+		shouldFindByParse  bool     // Can ParseOCRText extract the name?
+		shouldFindBySearch bool     // Can we find the card in the database?
 	}{
 		{
 			name: "Professor Elm - actual OCR from 84f402e1.jpeg",
@@ -871,7 +881,8 @@ func TestJapaneseCardIdentification(t *testing.T) {
 |
 |
 巻フ枚引いて: 手札にする。`,
-			expectedCard:       "Professor Elm",
+			expectedCardName:   "Professor Elm",
+			expectedCardIDs:    []string{"neo1-96", "bp-3"}, // Neo Genesis or Best of Game promo
 			shouldFindByParse:  true,
 			shouldFindBySearch: true,
 		},
@@ -881,7 +892,8 @@ func TestJapaneseCardIdentification(t *testing.T) {
 エネルギーサーキュレート
 |
 「基本エネルギーカード」 を`,
-			expectedCard:       "Energy Flow",
+			expectedCardName:   "Energy Flow",
+			expectedCardIDs:    []string{"gym1-122"}, // Gym Heroes only
 			shouldFindByParse:  true,
 			shouldFindBySearch: true,
 		},
@@ -891,8 +903,9 @@ func TestJapaneseCardIdentification(t *testing.T) {
 丁町
 すこいつりざお
 コインを投げて 「おもて」 なら`,
-			expectedCard:       "Super Rod",
-			shouldFindByParse:  true, // Should translate via OCR correction
+			expectedCardName:   "Super Rod",
+			expectedCardIDs:    []string{"neo1-103", "bw3-95", "dv1-20", "sv2-188", "xy8-149"}, // Multiple printings
+			shouldFindByParse:  true,                                                           // Should translate via OCR correction
 			shouldFindBySearch: true,
 		},
 		{
@@ -911,8 +924,9 @@ o7n
 つのでつつく
 30
 Na 092`,
-			expectedCard:       "Nidoran",
-			shouldFindByParse:  true, // Should handle corrupted gender symbol
+			expectedCardName:   "Nidoran ♂",
+			expectedCardIDs:    []string{"base1-55", "base4-83"}, // Base Set or Base Set 2
+			shouldFindByParse:  true,                             // Should handle corrupted gender symbol
 			shouldFindBySearch: true,
 		},
 	}
@@ -928,10 +942,10 @@ Na 092`,
 			if tt.shouldFindByParse {
 				if result.CardName == "" {
 					t.Errorf("ParseOCRText did not extract any card name")
-				} else if !strings.Contains(result.CardName, tt.expectedCard) &&
-					!strings.Contains(tt.expectedCard, result.CardName) {
+				} else if !strings.Contains(result.CardName, tt.expectedCardName) &&
+					!strings.Contains(tt.expectedCardName, result.CardName) {
 					// Allow partial matches (e.g., "Nidoran ♂" contains "Nidoran")
-					t.Logf("Card name %q doesn't exactly match expected %q", result.CardName, tt.expectedCard)
+					t.Logf("Card name %q doesn't exactly match expected %q", result.CardName, tt.expectedCardName)
 				}
 			}
 
@@ -949,25 +963,39 @@ Na 092`,
 				}
 
 				t.Logf("Found %d cards for %q:", searchResult.TotalCount, result.CardName)
-				for i := 0; i < 3 && i < len(searchResult.Cards); i++ {
+				for i := 0; i < 5 && i < len(searchResult.Cards); i++ {
 					t.Logf("  %d. %s (%s)", i+1, searchResult.Cards[i].Name, searchResult.Cards[i].ID)
 				}
 
-				// Verify expected card is in results
-				found := false
+				// Verify that one of the expected card IDs is in the top results
+				// This is stricter than just checking the name exists somewhere
+				foundExpectedID := false
+				var foundID string
+				var foundPosition int
 				for i := 0; i < 10 && i < len(searchResult.Cards); i++ {
-					cardNameLower := strings.ToLower(searchResult.Cards[i].Name)
-					expectedLower := strings.ToLower(tt.expectedCard)
-					if strings.Contains(cardNameLower, expectedLower) ||
-						strings.Contains(expectedLower, cardNameLower) {
-						found = true
-						t.Logf("✓ Found expected card %q at position %d", tt.expectedCard, i+1)
+					for _, expectedID := range tt.expectedCardIDs {
+						if searchResult.Cards[i].ID == expectedID {
+							foundExpectedID = true
+							foundID = expectedID
+							foundPosition = i + 1
+							break
+						}
+					}
+					if foundExpectedID {
 						break
 					}
 				}
 
-				if !found {
-					t.Errorf("Expected card %q not found in search results", tt.expectedCard)
+				if foundExpectedID {
+					t.Logf("✓ Found expected card ID %q at position %d", foundID, foundPosition)
+				} else {
+					// Log what IDs we did find for debugging
+					var foundIDs []string
+					for i := 0; i < 10 && i < len(searchResult.Cards); i++ {
+						foundIDs = append(foundIDs, searchResult.Cards[i].ID)
+					}
+					t.Errorf("None of expected card IDs %v found in top 10 results. Got: %v",
+						tt.expectedCardIDs, foundIDs)
 				}
 			}
 		})

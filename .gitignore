@@ -65,6 +65,10 @@ backend/internal/services/testdata/images/
 /*.jpeg
 /*.jpg
 /*.png
+test_cards_jp/
+
+# One-off documentation/analysis files
+OVERVIEW.md
 
 # Python
 __pycache__/

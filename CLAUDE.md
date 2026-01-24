@@ -68,6 +68,7 @@ Environment variables (see `backend/.env.example`):
 - `ADMIN_KEY` - Admin key for collection modification (optional, disables auth if not set)
 - `SYNC_TCGPLAYER_IDS_ON_STARTUP` - Set to "true" to auto-sync TCGPlayerIDs on startup
 - `GOOGLE_APPLICATION_CREDENTIALS` - Path to Google Cloud service account JSON (enables translation API)
+- `GOOGLE_API_KEY` - Gemini API key for Japanese card identification (preferred over Google Translate)
 - `TRANSLATION_CONFIDENCE_THRESHOLD` - Score below which triggers translation API (default: 800)
 
 ### Frontend
@@ -121,9 +122,10 @@ Environment variables:
 | `SnapshotService` | `internal/services/snapshot_service.go` | Daily collection value snapshots for historical tracking |
 | `ImageStorageService` | `internal/services/image_storage.go` | Store and retrieve scanned card images |
 | `TCGPlayerSyncService` | `internal/services/tcgplayer_sync.go` | Bulk sync TCGPlayerIDs from JustTCG for Pokemon cards |
-| `HybridTranslationService` | `internal/services/hybrid_translation.go` | Japanese card name translation (static map + cache + Google API) |
-| `TranslationCacheService` | `internal/services/translation_cache.go` | SQLite cache for translation API results |
-| `TranslationService` | `internal/services/translation_service.go` | Google Cloud Translation API v3 client |
+| `HybridTranslationService` | `internal/services/hybrid_translation.go` | Japanese card name translation (static map + Gemini + cache + Google API) |
+| `GeminiTranslationService` | `internal/services/gemini_translation.go` | Gemini 3 Flash for Japanese card identification with structured output |
+| `TranslationCacheService` | `internal/services/translation_cache.go` | SQLite cache for translation API results (with TTL for Gemini) |
+| `TranslationService` | `internal/services/translation_service.go` | Google Cloud Translation API v3 client (fallback) |
 
 ### Identifier Service (Python)
 
@@ -290,8 +292,11 @@ Japanese cards require special processing since the Pokemon database is English-
 When card matching confidence is below `TRANSLATION_CONFIDENCE_THRESHOLD` (default: 800):
 1. **Static translation**: 1025 Pokemon + common trainer cards translated instantly via `JapaneseToEnglishNames` map
 2. **Cache check**: Translations cached in SQLite (`translation_caches` table) to avoid repeat API calls
-3. **Google Cloud Translation API**: If cache miss, calls API and caches result
-4. **Re-match**: Translated text is matched against English database
+3. **Gemini 3 Flash**: If cache miss, uses Gemini for card identification with structured JSON output (returns candidates with confidence scores)
+4. **Google Cloud Translation API**: Fallback if Gemini confidence < 60% or unavailable
+5. **Re-match**: Translated text is matched against English database
+
+Gemini translations are cached with 30-day TTL (model may improve), Google API translations never expire.
 
 Scoring reference: name_exact=1000, name_partial=500, attack=200, number=300
 

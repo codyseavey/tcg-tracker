@@ -1011,13 +1011,21 @@ func parsePokemonOCR(result *OCRResult) {
 	// Extract card name - usually first substantial line or after HP
 	result.CardName = extractPokemonCardName(result.AllLines, result.Rarity)
 
-	// For Japanese cards, try to translate Japanese names to English
-	if result.DetectedLanguage == "Japanese" && result.CardName == "" {
-		// Try to find and translate Japanese card names from OCR text
+	// For Japanese cards, always try to translate Japanese names to English.
+	// We do this even if extractPokemonCardName found something, because it often
+	// extracts garbage English text (like "SUPPORTER", "ITEM") from Japanese cards.
+	// If translation succeeds, prefer the translated name over the extracted one.
+	if result.DetectedLanguage == "Japanese" {
+		originalName := result.CardName
 		for _, line := range result.AllLines {
 			line = strings.TrimSpace(line)
 			if englishName, found := TranslateJapaneseName(line); found {
 				result.CardName = englishName
+				// Log the translation for debugging (only if we replaced something)
+				if originalName != "" && originalName != englishName {
+					log.Printf("OCR: Japanese static translation: %q → %q (replaced extracted: %q)",
+						line, englishName, originalName)
+				}
 				break
 			}
 		}

@@ -172,4 +172,45 @@ var (
 		},
 		[]string{"type"}, // "auth", "api", "cache"
 	)
+
+	// Gemini Translation Metrics
+	GeminiRequestsTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "tcg_gemini_requests_total",
+			Help: "Total Gemini API translation requests",
+		},
+	)
+
+	GeminiAPILatency = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "tcg_gemini_api_latency_seconds",
+			Help:    "Gemini API call latency",
+			Buckets: []float64{0.1, 0.25, 0.5, 1, 2, 5},
+		},
+	)
+
+	GeminiErrorsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "tcg_gemini_errors_total",
+			Help: "Gemini API errors by type",
+		},
+		[]string{"type"}, // "network", "read", "api", "parse", "schema", "empty", "no_candidates"
+	)
+
+	GeminiConfidenceHistogram = promauto.NewHistogram(
+		prometheus.HistogramOpts{
+			Name:    "tcg_gemini_confidence",
+			Help:    "Gemini response confidence scores for best candidate",
+			Buckets: []float64{0.1, 0.3, 0.5, 0.6, 0.7, 0.8, 0.9, 0.95, 1.0},
+		},
+	)
+
+	// Translation Decision Metrics
+	TranslationDecisions = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "tcg_translation_decisions_total",
+			Help: "Translation source decisions",
+		},
+		[]string{"source"}, // "static", "cache", "gemini", "google_api", "failed", "skipped"
+	)
 )

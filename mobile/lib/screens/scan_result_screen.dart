@@ -212,6 +212,7 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
         condition: _condition,
         printing: _printing,
         scannedImageBytes: widget.scannedImageBytes,
+        language: widget.scanMetadata?.detectedLanguage,
       );
 
       if (!mounted) return;
@@ -1166,10 +1167,10 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
                   : null,
             ),
             subtitle: Text(
-              <String?>[setGroup.variantCountLabel, setGroup.releaseYear]
-                  .whereType<String>()
-                  .where((v) => v.isNotEmpty)
-                  .join(' • '),
+              <String?>[
+                setGroup.variantCountLabel,
+                setGroup.releaseYear,
+              ].whereType<String>().where((v) => v.isNotEmpty).join(' • '),
             ),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => setState(() => _selectedSetGroup = setGroup),

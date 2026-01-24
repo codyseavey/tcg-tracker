@@ -34,6 +34,7 @@ const editingItem = ref(null)
 const editQuantity = ref(1)
 const editCondition = ref('NM')
 const editPrinting = ref('Normal')
+const editLanguage = ref('English')
 
 // UI state
 const refreshingPrice = ref(false)
@@ -57,6 +58,14 @@ const conditions = [
   { value: 'MP', label: 'Moderate Play' },
   { value: 'HP', label: 'Heavy Play' },
   { value: 'D', label: 'Damaged' }
+]
+
+const languageOptions = [
+  { value: 'English', label: 'English', flag: '🇺🇸' },
+  { value: 'Japanese', label: 'Japanese', flag: '🇯🇵' },
+  { value: 'German', label: 'German', flag: '🇩🇪' },
+  { value: 'French', label: 'French', flag: '🇫🇷' },
+  { value: 'Italian', label: 'Italian', flag: '🇮🇹' }
 ]
 
 // Computed for grouped items
@@ -97,12 +106,19 @@ function getPrintingLabel(value) {
   return p ? p.label : value
 }
 
+// Helper to get language info
+function getLanguageInfo(value) {
+  const l = languageOptions.find(l => l.value === value)
+  return l || { value: value || 'English', label: value || 'English', flag: '🇺🇸' }
+}
+
 // Start editing an individual item
 function startEditItem(item) {
   editingItem.value = item
   editQuantity.value = item.quantity
   editCondition.value = item.condition
   editPrinting.value = item.printing
+  editLanguage.value = item.language || 'English'
   // Switch to items tab so the edit form is visible
   activeTab.value = 'items'
 }
@@ -120,7 +136,8 @@ function saveEditItem() {
     id: editingItem.value.id,
     quantity: editQuantity.value,
     condition: editCondition.value,
-    printing: editPrinting.value
+    printing: editPrinting.value,
+    language: editLanguage.value
   })
   editingItem.value = null
 }
@@ -337,10 +354,18 @@ const handleRemove = () => {
             <div v-if="activeTab === 'variants'" class="space-y-2">
               <div
                 v-for="variant in variants"
-                :key="`${variant.printing}-${variant.condition}`"
+                :key="`${variant.printing}-${variant.condition}-${variant.language}`"
                 class="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700 rounded-lg"
               >
                 <div class="flex items-center gap-3">
+                  <!-- Language badge for non-English cards -->
+                  <span
+                    v-if="variant.language && variant.language !== 'English'"
+                    class="text-xs font-bold px-2 py-1 rounded bg-blue-500 text-white"
+                    :title="variant.language"
+                  >
+                    {{ getLanguageInfo(variant.language).flag }}
+                  </span>
                   <span
                     v-if="variant.printing !== 'Normal'"
                     class="text-xs font-bold px-2 py-1 rounded"
@@ -405,7 +430,7 @@ const handleRemove = () => {
                           Note: Changing condition/printing will split 1 card from this stack
                         </span>
                       </div>
-                      <div class="grid grid-cols-3 gap-2">
+                      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
                         <div>
                           <label class="text-xs text-gray-500">Quantity</label>
                           <input
@@ -431,6 +456,15 @@ const handleRemove = () => {
                             class="w-full border dark:border-gray-600 rounded px-2 py-1 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                           >
                             <option v-for="p in printingOptions" :key="p.value" :value="p.value">{{ p.label }}</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label class="text-xs text-gray-500">Language</label>
+                          <select
+                            v-model="editLanguage"
+                            class="w-full border dark:border-gray-600 rounded px-2 py-1 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                          >
+                            <option v-for="l in languageOptions" :key="l.value" :value="l.value">{{ l.flag }} {{ l.label }}</option>
                           </select>
                         </div>
                       </div>
@@ -471,6 +505,14 @@ const handleRemove = () => {
                   </div>
                   <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2 flex-wrap">
+                      <!-- Language badge for non-English cards -->
+                      <span
+                        v-if="collectionItem.language && collectionItem.language !== 'English'"
+                        class="text-xs font-bold px-2 py-0.5 rounded bg-blue-500 text-white"
+                        :title="collectionItem.language"
+                      >
+                        {{ getLanguageInfo(collectionItem.language).flag }}
+                      </span>
                       <span
                         v-if="collectionItem.printing !== 'Normal'"
                         class="text-xs font-bold px-2 py-0.5 rounded"

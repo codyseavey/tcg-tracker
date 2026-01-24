@@ -146,19 +146,26 @@ export const collectionService = {
   },
 
   async add(cardId, options = {}) {
-    const response = await api.post('/collection', {
+    const payload = {
       card_id: cardId,
       quantity: options.quantity || 1,
       condition: options.condition || 'NM',
       printing: options.printing || 'Normal',
       notes: options.notes || ''
-    })
+    }
+    // Include language if specified (for Japanese/foreign cards with different pricing)
+    if (options.language) {
+      payload.language = options.language
+    }
+    const response = await api.post('/collection', payload)
     return response.data
   },
 
   /**
    * Update a collection item
    * Returns { item, operation, message } where operation is 'updated', 'split', or 'merged'
+   * @param {number} id - Collection item ID
+   * @param {Object} updates - Fields to update: { quantity, condition, printing, language }
    */
   async update(id, updates) {
     const response = await api.put(`/collection/${id}`, updates)

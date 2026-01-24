@@ -113,6 +113,7 @@ Environment variables:
 - `JUSTTCG_DAILY_LIMIT` - Daily API request limit (default: 1000)
 - `SYNC_TCGPLAYER_IDS_ON_STARTUP` - Set to "true" to sync missing Pokemon TCGPlayerIDs on startup
 - `GOOGLE_APPLICATION_CREDENTIALS` - Path to Google Cloud service account JSON (enables translation API)
+- `GOOGLE_API_KEY` - Gemini API key for Japanese card identification (preferred over Google Translate)
 - `TRANSLATION_CONFIDENCE_THRESHOLD` - Score below which triggers translation API (default: 800)
 
 #### 2. Frontend (Vue.js Web App)
@@ -245,7 +246,8 @@ The system uses a two-tier OCR approach for card identification:
 - **Hybrid Translation**: For low-confidence matches, Japanese text is translated using:
   1. Static map (1025 Pokemon + common trainer cards)
   2. SQLite cache (avoids repeat API calls)
-  3. Google Cloud Translation API (if credentials configured)
+  3. Gemini 3 Flash (if GOOGLE_API_KEY configured, returns candidates with confidence)
+  4. Google Cloud Translation API (fallback if Gemini unavailable or low confidence)
 
 ## External APIs
 
@@ -275,6 +277,10 @@ The backend exposes Prometheus metrics at `/metrics` for monitoring:
 - `tcg_translation_requests_total` - Translation requests by source (static/cache/api)
 - `tcg_translation_cache_hits_total` - Translation cache hit count
 - `tcg_translation_api_latency_seconds` - Google Cloud Translation API latency
+- `tcg_gemini_requests_total` - Gemini API requests
+- `tcg_gemini_api_latency_seconds` - Gemini API latency
+- `tcg_gemini_confidence` - Gemini response confidence scores
+- `tcg_translation_decisions_total` - Translation source decisions (static/cache/gemini/google_api)
 
 ### Grafana Dashboard
 Import the pre-built dashboard from `monitoring/grafana-dashboard.json` to visualize:

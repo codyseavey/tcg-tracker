@@ -22,7 +22,8 @@ const filters = ref({
   printings: [],
   sets: [],
   conditions: [],
-  rarities: []
+  rarities: [],
+  languages: []
 })
 
 // Extract available filter options from collection data
@@ -85,6 +86,21 @@ const availableRarities = computed(() => {
   return [...rarities].sort()
 })
 
+const availableLanguages = computed(() => {
+  const languages = new Set()
+  store.groupedItems.forEach(group => {
+    group.items?.forEach(item => {
+      if (item.language) languages.add(item.language)
+    })
+  })
+  // Sort with English first, then alphabetically
+  return [...languages].sort((a, b) => {
+    if (a === 'English') return -1
+    if (b === 'English') return 1
+    return a.localeCompare(b)
+  })
+})
+
 // Use grouped items for display with search filtering
 const filteredItems = computed(() => {
   let items = [...store.groupedItems]
@@ -135,6 +151,13 @@ const filteredItems = computed(() => {
     )
   }
 
+  // Language filter - match if ANY variant has a selected language
+  if (filters.value.languages.length > 0) {
+    items = items.filter(group =>
+      group.items?.some(item => filters.value.languages.includes(item.language))
+    )
+  }
+
   // Sorting
   items.sort((a, b) => {
     switch (sortBy.value) {
@@ -166,15 +189,16 @@ const activeFilterCount = computed(() => {
   return filters.value.printings.length +
          filters.value.sets.length +
          filters.value.conditions.length +
-         filters.value.rarities.length
+         filters.value.rarities.length +
+         filters.value.languages.length
 })
 
 const handleSelect = (groupedItem) => {
   selectedItem.value = groupedItem
 }
 
-const handleUpdate = async ({ id, quantity, condition, printing }) => {
-  const result = await store.updateItem(id, { quantity, condition, printing })
+const handleUpdate = async ({ id, quantity, condition, printing, language }) => {
+  const result = await store.updateItem(id, { quantity, condition, printing, language })
   // Show feedback about the operation
   if (result.message) {
     // Could show a toast here
@@ -250,6 +274,9 @@ const syncFiltersToUrl = () => {
   if (filters.value.rarities.length > 0) {
     query.rarities = filters.value.rarities.join(',')
   }
+  if (filters.value.languages.length > 0) {
+    query.languages = filters.value.languages.join(',')
+  }
   if (filterGame.value !== 'all') {
     query.game = filterGame.value
   }
@@ -278,7 +305,8 @@ const initFiltersFromUrl = () => {
     printings: parseQueryArray(q.printings),
     sets: parseQueryArray(q.sets),
     conditions: parseQueryArray(q.conditions),
-    rarities: parseQueryArray(q.rarities)
+    rarities: parseQueryArray(q.rarities),
+    languages: parseQueryArray(q.languages)
   }
 
   if (q.game && ['mtg', 'pokemon'].includes(q.game)) {
@@ -364,6 +392,7 @@ onMounted(() => {
           :available-sets="availableSets"
           :available-conditions="availableConditions"
           :available-rarities="availableRarities"
+          :available-languages="availableLanguages"
         />
       </div>
 
@@ -389,7 +418,7 @@ onMounted(() => {
       <template v-if="activeFilterCount > 0 || searchQuery.trim()">
         <p class="text-gray-500 dark:text-gray-400 mb-4">No cards match your filters</p>
         <button
-          @click="filters = { printings: [], sets: [], conditions: [], rarities: [] }; searchQuery = ''"
+          @click="filters = { printings: [], sets: [], conditions: [], rarities: [], languages: [] }; searchQuery = ''"
           class="inline-block bg-gray-600 text-white px-6 py-2 rounded-lg hover:bg-gray-700"
         >
           Clear Filters

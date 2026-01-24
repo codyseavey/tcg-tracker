@@ -170,6 +170,8 @@ class ScanMetadata {
   final List<String> candidateSets; // Possible sets when ambiguous
   // Reverse holo detection
   final bool isReverseHolo;
+  // Language detection
+  final String? detectedLanguage; // e.g., "English", "Japanese", "German"
 
   ScanMetadata({
     this.cardName,
@@ -192,6 +194,7 @@ class ScanMetadata {
     this.matchReason,
     this.candidateSets = const [],
     this.isReverseHolo = false,
+    this.detectedLanguage,
   });
 
   factory ScanMetadata.fromJson(Map<String, dynamic> json) {
@@ -234,6 +237,7 @@ class ScanMetadata {
               .toList() ??
           [],
       isReverseHolo: json['is_reverse_holo'] ?? false,
+      detectedLanguage: json['detected_language'],
     );
   }
 
@@ -252,6 +256,9 @@ class ScanMetadata {
     if (rarity != null && rarity!.isNotEmpty) {
       parts.add(rarity!);
     }
+    if (detectedLanguage != null && detectedLanguage != 'English') {
+      parts.add(detectedLanguage!);
+    }
     if (isFirstEdition) {
       parts.add('1st Edition');
     }
@@ -266,6 +273,10 @@ class ScanMetadata {
     }
     return parts.isEmpty ? 'No details detected' : parts.join(' • ');
   }
+
+  /// Returns true if the card is non-English (Japanese, German, etc.)
+  bool get isNonEnglish =>
+      detectedLanguage != null && detectedLanguage != 'English';
 
   /// Returns true if image analysis detected foil with high confidence
   bool get hasHighConfidenceFoil =>

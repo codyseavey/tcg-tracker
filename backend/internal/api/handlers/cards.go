@@ -405,14 +405,41 @@ func (h *CardHandler) searchAndMatchCards(c *gin.Context, parsed *services.OCRRe
 
 		// Priority 3: Use full-text matching when we have substantial OCR text
 		// This matches against card name, attacks, abilities, and flavor text
+		// BUT require a minimum confidence score to accept results
 		if result == nil && len(fallbackText) >= 20 {
 			result, textMatches = h.pokemonService.MatchByFullText(
 				fallbackText,
 				parsed.CandidateSets,
 			)
-			// If full-text matching found good results, use them
-			// Otherwise fall back to traditional search
-			if result == nil || len(result.Cards) == 0 {
+
+			// Score threshold: require at least a partial name match (500) to accept
+			// Score reference: name_exact=1000, name_partial=500, attack=200, number=300
+			const minAcceptScore = 500
+			if result != nil && len(result.Cards) > 0 {
+				topScore := result.TopScore
+				topCard := result.Cards[0].Name
+
+				if topScore < minAcceptScore {
+					// Full-text match is low confidence
+					if exactCard != nil {
+						// Prefer exact set+number match over low-confidence full-text
+						log.Printf("CardMatch: full-text score too low (%d < %d) for %q, using exactCard %q instead",
+							topScore, minAcceptScore, topCard, exactCard.Name)
+						result = &models.CardSearchResult{
+							Cards:      []models.Card{*exactCard},
+							TotalCount: 1,
+							HasMore:    false,
+						}
+						textMatches = nil
+					} else {
+						// No exact card, reset to try other methods
+						log.Printf("CardMatch: full-text score too low (%d < %d) for %q, trying other methods",
+							topScore, minAcceptScore, topCard)
+						result = nil
+						textMatches = nil
+					}
+				}
+			} else {
 				result = nil // Reset to trigger fallback
 				textMatches = nil
 			}
@@ -464,7 +491,7 @@ func (h *CardHandler) searchAndMatchCards(c *gin.Context, parsed *services.OCRRe
 		// IMPORTANT: Only trigger translation when full-text matching ran and produced a low score.
 		// Other matching paths (exact set+number, name-based search) do not provide a comparable score.
 		if h.translationService != nil && parsed.DetectedLanguage == "Japanese" && result != nil && result.TopScore > 0 && result.TopScore < h.translationService.GetConfidenceThreshold() {
-			translatedText, usedAPI, _ := h.translationService.TranslateForMatching(
+			translationResult, _ := h.translationService.TranslateForMatching(
 				c.Request.Context(),
 				fallbackText,
 				parsed.DetectedLanguage,
@@ -472,25 +499,34 @@ func (h *CardHandler) searchAndMatchCards(c *gin.Context, parsed *services.OCRRe
 			)
 
 			// If translation was performed (API or static map changed the text), retry matching
-			if translatedText != fallbackText {
+			if translationResult != nil && translationResult.TranslatedText != fallbackText {
+				translatedText := translationResult.TranslatedText
 				translatedParsed := services.ParseOCRText(translatedText, game)
+
+				// Use set info from Gemini candidates if available
+				if len(translationResult.Candidates) > 0 {
+					for _, candidate := range translationResult.Candidates {
+						if candidate.SetCode != "" && !contains(parsed.CandidateSets, candidate.SetCode) {
+							parsed.CandidateSets = append(parsed.CandidateSets, candidate.SetCode)
+						}
+						if candidate.CardNumber != "" && parsed.CardNumber == "" {
+							parsed.CardNumber = candidate.CardNumber
+						}
+					}
+				}
 
 				// Try full-text matching with translated text
 				if len(translatedText) >= 20 {
 					translatedResult, translatedMatches := h.pokemonService.MatchByFullText(
 						translatedText,
-						parsed.CandidateSets, // Keep original set hints
+						parsed.CandidateSets, // Use original + Gemini hints
 					)
 
 					// Use translated result if it's better than current
 					if translatedResult != nil && len(translatedResult.Cards) > 0 && translatedResult.TopScore > result.TopScore {
 						result = translatedResult
 						textMatches = translatedMatches
-						if usedAPI {
-							parsed.TranslationSource = "api"
-						} else {
-							parsed.TranslationSource = "static"
-						}
+						parsed.TranslationSource = translationResult.Source
 					}
 				}
 
@@ -499,11 +535,7 @@ func (h *CardHandler) searchAndMatchCards(c *gin.Context, parsed *services.OCRRe
 					nameResult, _ := h.pokemonService.SearchCards(translatedParsed.CardName)
 					if nameResult != nil && len(nameResult.Cards) > 0 {
 						result = nameResult
-						if usedAPI {
-							parsed.TranslationSource = "api"
-						} else {
-							parsed.TranslationSource = "static"
-						}
+						parsed.TranslationSource = translationResult.Source
 					}
 				}
 			}
@@ -664,4 +696,14 @@ func rankCardMatches(cards []models.Card, parsed *services.OCRResult) []models.C
 	}
 
 	return result
+}
+
+// contains checks if a string slice contains a value
+func contains(slice []string, val string) bool {
+	for _, item := range slice {
+		if item == val {
+			return true
+		}
+	}
+	return false
 }

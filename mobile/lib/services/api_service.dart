@@ -159,6 +159,7 @@ class ApiService {
     String condition = 'NM',
     PrintingType printing = PrintingType.normal,
     List<int>? scannedImageBytes,
+    String? language, // e.g., "Japanese", "English", "German"
   }) async {
     final serverUrl = await getServerUrl();
     final uri = Uri.parse('$serverUrl/api/collection');
@@ -169,6 +170,11 @@ class ApiService {
       'condition': condition,
       'printing': printing.value,
     };
+
+    // Include language if specified (for Japanese/foreign cards with different pricing)
+    if (language != null && language.isNotEmpty) {
+      body['language'] = language;
+    }
 
     // Include scanned image if provided
     if (scannedImageBytes != null && scannedImageBytes.isNotEmpty) {

@@ -1882,7 +1882,7 @@ SV2A`,
 			wantCardName:   "Ultra Ball", // Translated from Japanese ハイパーボール
 		},
 		{
-			// Focus: STADIUM should not be used as card name
+			// Focus: STADIUM should not be used as card name; Japanese name should be translated
 			name: "Japanese stadium with STADIUM as only English text",
 			input: `頂への雪道
 STADIUM
@@ -1891,8 +1891,8 @@ STADIUM
 SV4`,
 			wantCardNumber: "89",
 			// Set code inference may vary - the focus is that STADIUM is skipped
-			wantLanguage:  "Japanese",
-			wantNameEmpty: true, // STADIUM should be skipped
+			wantLanguage: "Japanese",
+			wantCardName: "Path to the Peak", // Now translated via static map
 		},
 		{
 			name: "Japanese card minimal text - just name and number",
