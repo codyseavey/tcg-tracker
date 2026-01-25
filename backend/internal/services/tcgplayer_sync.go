@@ -387,6 +387,8 @@ func convertToJustTCGSetID(ourSetName string) string {
 		"scarlet-and-violet-promos": "svp-scarlet-and-violet-promos-pokemon",
 
 		// Classic sets (WotC era)
+		"si1":                  "southern-islands-pokemon",
+		"southern-islands":     "southern-islands-pokemon",
 		"base1":                "base-set-pokemon",
 		"base":                 "base-set-pokemon",
 		"base-set":             "base-set-pokemon",
