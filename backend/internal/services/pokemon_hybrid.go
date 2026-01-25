@@ -61,7 +61,9 @@ type LocalPokemonCard struct {
 	Rarity                 string          `json:"rarity"`
 	FlavorText             string          `json:"flavorText"`
 	EvolvesFrom            string          `json:"evolvesFrom"`
+	TCGPlayerID            string          `json:"tcgplayerId,omitempty"` // TCGPlayer product ID (for Japanese cards)
 	SetID                  string          // Populated from filename
+	IsJapanese             bool            // True if this is a Japanese-exclusive card
 
 	// Pre-computed fields for performance (built at load time)
 	searchableText string // Full-text searchable content
@@ -234,7 +236,7 @@ func NewPokemonHybridService(dataDir string) (*PokemonHybridService, error) {
 }
 
 func (s *PokemonHybridService) loadData(dataDir string) error {
-	// Check if data exists, download if not
+	// Check if English data exists, download if not
 	dataPath := filepath.Join(dataDir, "pokemon-tcg-data-master")
 	if _, err := os.Stat(dataPath); os.IsNotExist(err) {
 		fmt.Println("Pokemon TCG data not found. Downloading...")
@@ -244,7 +246,7 @@ func (s *PokemonHybridService) loadData(dataDir string) error {
 		fmt.Println("Pokemon TCG data downloaded successfully.")
 	}
 
-	// Load sets
+	// Load English sets
 	setsFile := filepath.Join(dataDir, "pokemon-tcg-data-master", "sets", "en.json")
 	setsData, err := os.ReadFile(setsFile)
 	if err != nil {
@@ -260,8 +262,44 @@ func (s *PokemonHybridService) loadData(dataDir string) error {
 		s.sets[set.ID] = set
 	}
 
-	// Load all card files
+	// Load all English card files
 	cardsDir := filepath.Join(dataDir, "pokemon-tcg-data-master", "cards", "en")
+	if err := s.loadCardsFromDirectory(cardsDir, false); err != nil {
+		return fmt.Errorf("failed to load English cards: %w", err)
+	}
+
+	englishCount := len(s.cards)
+
+	// Load Japanese card data if available
+	japanDataPath := filepath.Join(dataDir, "pokemon-tcg-data-japan")
+	if _, err := os.Stat(japanDataPath); err == nil {
+		// Load Japanese sets
+		japanSetsFile := filepath.Join(japanDataPath, "sets.json")
+		if japanSetsData, err := os.ReadFile(japanSetsFile); err == nil {
+			var japanSets []LocalSet
+			if err := json.Unmarshal(japanSetsData, &japanSets); err == nil {
+				for _, set := range japanSets {
+					s.sets[set.ID] = set
+				}
+			}
+		}
+
+		// Load Japanese card files
+		japanCardsDir := filepath.Join(japanDataPath, "cards")
+		if err := s.loadCardsFromDirectory(japanCardsDir, true); err != nil {
+			log.Printf("Warning: failed to load Japanese cards: %v", err)
+		}
+	}
+
+	japaneseCount := len(s.cards) - englishCount
+	log.Printf("Pokemon data loaded: %d cards (%d English, %d Japanese), %d sets, %d indexed words",
+		len(s.cards), englishCount, japaneseCount, len(s.sets), len(s.wordIndex))
+
+	return nil
+}
+
+// loadCardsFromDirectory loads card JSON files from a directory and indexes them
+func (s *PokemonHybridService) loadCardsFromDirectory(cardsDir string, isJapanese bool) error {
 	files, err := os.ReadDir(cardsDir)
 	if err != nil {
 		return fmt.Errorf("failed to read cards directory: %w", err)
@@ -288,6 +326,7 @@ func (s *PokemonHybridService) loadData(dataDir string) error {
 
 		for i := range cards {
 			cards[i].SetID = setID
+			cards[i].IsJapanese = isJapanese
 			// Pre-compute lowercase fields and searchable text
 			cards[i].precomputeFields()
 
@@ -316,9 +355,6 @@ func (s *PokemonHybridService) loadData(dataDir string) error {
 			}
 		}
 	}
-
-	log.Printf("Pokemon data loaded: %d cards, %d sets, %d indexed words",
-		len(s.cards), len(s.sets), len(s.wordIndex))
 
 	return nil
 }
@@ -521,6 +557,7 @@ func (s *PokemonHybridService) convertToCard(lc LocalPokemonCard) models.Card {
 		Rarity:        lc.Rarity,
 		ImageURL:      lc.Images.Small,
 		ImageURLLarge: lc.Images.Large,
+		TCGPlayerID:   lc.TCGPlayerID, // Include TCGPlayerID for Japanese cards
 		PriceSource:   "pending",
 	}
 }
@@ -566,6 +603,136 @@ func (s *PokemonHybridService) GetCardBySetAndNumber(setCode, cardNumber string)
 		}
 	}
 
+	return nil
+}
+
+// SearchJapaneseByName searches for Japanese-exclusive cards by name.
+// Returns cards where IsJapanese is true and name matches.
+// This is used by Gemini when it identifies a card as Japanese to find
+// Japanese-exclusive printings (like Leader's Stadium cards).
+func (s *PokemonHybridService) SearchJapaneseByName(name string) []*models.Card {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	nameLower := strings.ToLower(strings.TrimSpace(name))
+	var results []*models.Card
+
+	for _, localCard := range s.cards {
+		// Only include Japanese cards
+		if !localCard.IsJapanese {
+			continue
+		}
+
+		// Check for name match (exact or contains)
+		if localCard.nameLower == nameLower ||
+			strings.Contains(localCard.nameLower, nameLower) ||
+			strings.Contains(nameLower, localCard.nameLower) {
+			card := s.convertToCard(localCard)
+			results = append(results, &card)
+		}
+	}
+
+	return results
+}
+
+// SearchJapaneseByNameForGemini implements JapaneseCardSearcher interface for Gemini function calling.
+// Searches for Japanese-exclusive Pokemon cards by name and returns candidates with images.
+func (s *PokemonHybridService) SearchJapaneseByNameForGemini(ctx context.Context, name string, limit int) ([]CandidateCard, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if limit <= 0 {
+		limit = 10
+	}
+	if limit > 20 {
+		limit = 20
+	}
+
+	nameLower := strings.ToLower(strings.TrimSpace(name))
+	if nameLower == "" {
+		return nil, nil
+	}
+
+	// Score cards based on match quality
+	type scoredMatch struct {
+		card  LocalPokemonCard
+		score int
+	}
+	var matches []scoredMatch
+
+	for _, localCard := range s.cards {
+		// Only include Japanese cards
+		if !localCard.IsJapanese {
+			continue
+		}
+
+		score := 0
+
+		// Exact name match (highest priority)
+		if localCard.nameLower == nameLower {
+			score = 1000
+		} else if strings.HasPrefix(localCard.nameLower, nameLower+" ") {
+			// Name with suffix
+			score = 800
+		} else if strings.HasSuffix(localCard.nameLower, " "+nameLower) {
+			// Name with prefix
+			score = 700
+		} else if strings.Contains(localCard.nameLower, nameLower) {
+			// Partial name match
+			score = 500
+		}
+
+		if score > 0 {
+			matches = append(matches, scoredMatch{card: localCard, score: score})
+		}
+	}
+
+	// Sort by score descending, then by name
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].score != matches[j].score {
+			return matches[i].score > matches[j].score
+		}
+		return matches[i].card.Name < matches[j].card.Name
+	})
+
+	// Convert to CandidateCard
+	var candidates []CandidateCard
+	for i := 0; i < len(matches) && len(candidates) < limit; i++ {
+		lc := matches[i].card
+		imageURL := lc.Images.Large
+		if imageURL == "" {
+			imageURL = lc.Images.Small
+		}
+		if imageURL == "" {
+			continue // Skip cards without images
+		}
+
+		set := s.sets[lc.SetID]
+		candidates = append(candidates, CandidateCard{
+			ID:       lc.ID,
+			Name:     lc.Name,
+			SetCode:  lc.SetID,
+			SetName:  set.Name,
+			Number:   lc.Number,
+			ImageURL: imageURL,
+		})
+	}
+
+	return candidates, nil
+}
+
+// GetJapaneseCardByID finds a Japanese card by its ID (prefixed with "jp-")
+func (s *PokemonHybridService) GetJapaneseCardByID(id string) *models.Card {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if idx, ok := s.idIndex[id]; ok {
+		localCard := s.cards[idx]
+		if localCard.IsJapanese {
+			card := s.convertToCard(localCard)
+			return &card
+		}
+	}
 	return nil
 }
 

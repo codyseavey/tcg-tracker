@@ -101,6 +101,13 @@ type CardSearcher interface {
 	GetCardImage(ctx context.Context, cardID string) (string, error)
 }
 
+// JapaneseCardSearcher is an optional interface for searching Japanese-exclusive cards.
+// Implemented by PokemonHybridService when Japanese card data is loaded.
+type JapaneseCardSearcher interface {
+	// SearchJapaneseByName searches for Japanese-exclusive cards by name
+	SearchJapaneseByName(ctx context.Context, name string, limit int) ([]CandidateCard, error)
+}
+
 // detectMimeType returns the MIME type for image bytes
 func detectMimeType(data []byte) string {
 	// http.DetectContentType uses the first 512 bytes
@@ -301,6 +308,15 @@ func (s *GeminiService) executeFunctionCalls(
 			resultJSON, err = s.handleSearchCards(ctx, call.Args, pokemonSearcher)
 		case "search_mtg_cards":
 			resultJSON, err = s.handleSearchCards(ctx, call.Args, mtgSearcher)
+		case "search_japanese_pokemon_cards":
+			// Check if the Pokemon searcher implements JapaneseCardSearcher
+			if japaneseSearcher, ok := pokemonSearcher.(interface {
+				SearchJapaneseByNameForGemini(ctx context.Context, name string, limit int) ([]CandidateCard, error)
+			}); ok {
+				resultJSON, err = s.handleSearchJapaneseCards(ctx, call.Args, japaneseSearcher)
+			} else {
+				err = fmt.Errorf("Japanese card search not available (no Japanese card data loaded)")
+			}
 		case "get_pokemon_card":
 			resultJSON, err = s.handleGetCard(ctx, call.Args, pokemonSearcher)
 		case "get_mtg_card":
@@ -357,6 +373,44 @@ func (s *GeminiService) handleSearchCards(ctx context.Context, args map[string]i
 	cards, err := searcher.SearchByName(ctx, name, limit)
 	if err != nil {
 		return json.Marshal(map[string]interface{}{"error": err.Error()})
+	}
+
+	return json.Marshal(map[string]interface{}{
+		"cards": cards,
+		"count": len(cards),
+	})
+}
+
+// JapaneseSearcher is the interface for the SearchJapaneseByNameForGemini method
+type JapaneseSearcher interface {
+	SearchJapaneseByNameForGemini(ctx context.Context, name string, limit int) ([]CandidateCard, error)
+}
+
+func (s *GeminiService) handleSearchJapaneseCards(ctx context.Context, args map[string]interface{}, searcher JapaneseSearcher) ([]byte, error) {
+	name, _ := args["name"].(string)
+	if name == "" {
+		return json.Marshal(map[string]interface{}{"error": "name is required"})
+	}
+
+	limit := 10
+	if l, ok := args["limit"].(float64); ok {
+		limit = int(l)
+		if limit > 20 {
+			limit = 20
+		}
+	}
+
+	cards, err := searcher.SearchJapaneseByNameForGemini(ctx, name, limit)
+	if err != nil {
+		return json.Marshal(map[string]interface{}{"error": err.Error()})
+	}
+
+	if len(cards) == 0 {
+		return json.Marshal(map[string]interface{}{
+			"cards":   cards,
+			"count":   0,
+			"message": "No Japanese-exclusive cards found. The card may be available in the English database if it was released internationally.",
+		})
 	}
 
 	return json.Marshal(map[string]interface{}{
@@ -624,13 +678,21 @@ HOW TO PICK CANDIDATES EFFICIENTLY:
 VISUAL COMPARISON:
 - Compare ILLUSTRATION: character pose, background, art style
 - Compare SET SYMBOL/ICON: Pokemon symbols are below artwork on right; MTG symbols are middle-right
-- Japanese/foreign cards have the SAME artwork as their English equivalents
+
+JAPANESE CARDS WITH DIFFERENT ARTWORK:
+- IMPORTANT: Some Japanese cards have DIFFERENT artwork than English versions (censored/modified for Western release)
+- Examples: Misty's Tears, Sabrina's Gengar, many Gym era trainer cards
+- If you see a Japanese card whose artwork DOES NOT match any English version:
+  1. Use search_japanese_pokemon_cards to search for Japanese-exclusive printings
+  2. Japanese cards are in sets like "Leaders' Stadium" (リーダーズスタジアム), "Gym" sets, etc.
+  3. Japanese card IDs start with "jp-" (e.g., "jp-leaders-stadium-mistys-tears")
 
 TOOLS AVAILABLE:
-- search_pokemon_cards: Search by name, returns card metadata (NOT viewable images)
-- search_mtg_cards: Search by name, returns card metadata (NOT viewable images)
-- get_pokemon_card: Get card by set+number, returns metadata (NOT viewable images)
-- get_mtg_card: Get card by set+number, returns metadata (NOT viewable images)
+- search_pokemon_cards: Search English Pokemon cards by name
+- search_mtg_cards: Search English MTG cards by name
+- search_japanese_pokemon_cards: Search Japanese-EXCLUSIVE Pokemon cards (cards with different artwork than English)
+- get_pokemon_card: Get card by set+number
+- get_mtg_card: Get card by set+number
 - view_card_image: REQUIRED - Actually retrieves and shows you the card image for comparison
 
 CRITICAL RULES:
@@ -639,11 +701,12 @@ CRITICAL RULES:
 3. NEVER return a card_id based only on name/number match - ALWAYS verify artwork
 4. If you cannot find an exact match after viewing a few candidates, return card_id="" with candidates list
 5. Be EFFICIENT - return a result within 5 turns if possible
+6. For Japanese cards with non-matching artwork, use search_japanese_pokemon_cards
 
 SET CODES:
 - Pokemon: "swsh4", "sv4", "mew", "base1", "neo1", "base2" (Jungle), etc.
+- Japanese: "jp-leaders-stadium", "jp-base-expansion-pack", etc. (prefixed with "jp-")
 - MTG: 3 letters like "2XM", "MH2", "ONE"
-- Our database only contains ENGLISH cards
 
 LANGUAGE DETECTION:
 - Japanese: Japanese characters (ポケモン, モンスターボール, etc.)
@@ -765,6 +828,24 @@ var toolDeclarations = []geminiFunctionDecl{
 				},
 			},
 			"required": []string{"card_id", "game"},
+		},
+	},
+	{
+		Name:        "search_japanese_pokemon_cards",
+		Description: "Search for Japanese-exclusive Pokemon TCG cards by name. Use this when the card is Japanese AND the English versions have different artwork (e.g., censored artwork like Misty's Tears, Japanese-only sets like Leaders' Stadium). Returns Japanese cards with their IDs, names, set info, and image URLs.",
+		Parameters: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"name": map[string]interface{}{
+					"type":        "string",
+					"description": "Card name to search for in English (e.g., 'Misty\\'s Tears', 'Sabrina')",
+				},
+				"limit": map[string]interface{}{
+					"type":        "integer",
+					"description": "Maximum number of results (default 10, max 20)",
+				},
+			},
+			"required": []string{"name"},
 		},
 	},
 }

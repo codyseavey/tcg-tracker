@@ -836,5 +836,113 @@ func BenchmarkMatchByFullText_WithSetFilter(b *testing.B) {
 	}
 }
 
-// Note: TestJapaneseCardIdentification was removed during Gemini-first refactor.
-// Japanese card identification is now handled by GeminiService with function calling.
+// TestJapaneseCardSearch tests the SearchJapaneseByName functionality
+func TestJapaneseCardSearch(t *testing.T) {
+	dataDir := getTestDataDir()
+	if dataDir == "" {
+		t.Skip("Pokemon TCG data not found, skipping integration test")
+	}
+
+	service, err := NewPokemonHybridService(dataDir)
+	if err != nil {
+		t.Fatalf("Failed to initialize PokemonHybridService: %v", err)
+	}
+
+	// Check if Japanese data is loaded
+	japanDataPath := filepath.Join(dataDir, "pokemon-tcg-data-japan", "cards")
+	if _, err := os.Stat(japanDataPath); os.IsNotExist(err) {
+		t.Skip("Japanese card data not found, skipping test")
+	}
+
+	tests := []struct {
+		name         string
+		searchName   string
+		expectCount  int  // Minimum expected count (-1 to skip check)
+		expectPrefix bool // Expect all IDs to start with "jp-"
+	}{
+		{
+			name:         "Search for Misty's Tears in Japanese data",
+			searchName:   "Misty's Tears",
+			expectCount:  1,
+			expectPrefix: true,
+		},
+		{
+			name:         "Search for Charizard in Japanese data",
+			searchName:   "Charizard",
+			expectCount:  -1, // Just check that we get some results
+			expectPrefix: true,
+		},
+		{
+			name:         "Search for nonexistent card",
+			searchName:   "Totally Fake Card Name XYZ123",
+			expectCount:  0,
+			expectPrefix: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results := service.SearchJapaneseByName(tt.searchName)
+
+			if tt.expectCount >= 0 && len(results) < tt.expectCount {
+				t.Errorf("SearchJapaneseByName(%q) returned %d results, want at least %d",
+					tt.searchName, len(results), tt.expectCount)
+			}
+
+			if tt.expectPrefix {
+				for _, card := range results {
+					if !strings.HasPrefix(card.ID, "jp-") {
+						t.Errorf("Japanese card ID %q should start with 'jp-'", card.ID)
+					}
+				}
+			}
+
+			if len(results) > 0 {
+				t.Logf("Found %d Japanese cards for %q:", len(results), tt.searchName)
+				for i, card := range results {
+					if i >= 5 {
+						t.Logf("  ... and %d more", len(results)-5)
+						break
+					}
+					t.Logf("  - %s (%s) from %s", card.Name, card.ID, card.SetCode)
+				}
+			}
+		})
+	}
+}
+
+// TestJapaneseCardLoading verifies Japanese card data is loaded alongside English cards
+func TestJapaneseCardLoading(t *testing.T) {
+	dataDir := getTestDataDir()
+	if dataDir == "" {
+		t.Skip("Pokemon TCG data not found, skipping integration test")
+	}
+
+	service, err := NewPokemonHybridService(dataDir)
+	if err != nil {
+		t.Fatalf("Failed to initialize PokemonHybridService: %v", err)
+	}
+
+	totalCards := service.GetCardCount()
+	totalSets := service.GetSetCount()
+
+	t.Logf("Total cards loaded: %d", totalCards)
+	t.Logf("Total sets loaded: %d", totalSets)
+
+	// Check if Japanese data directory exists
+	japanDataPath := filepath.Join(dataDir, "pokemon-tcg-data-japan", "cards")
+	if _, err := os.Stat(japanDataPath); os.IsNotExist(err) {
+		t.Log("Japanese card data not found - only English cards loaded")
+		return
+	}
+
+	// Count Japanese cards by searching for a common word
+	jpCards := service.SearchJapaneseByName("Pokemon")
+	t.Logf("Japanese cards found with 'Pokemon' search: %d", len(jpCards))
+
+	// Verify we can find a specific Japanese card
+	mistysTearsCards := service.SearchJapaneseByName("Misty's Tears")
+	if len(mistysTearsCards) > 0 {
+		t.Logf("Found Misty's Tears: %s (%s)", mistysTearsCards[0].ID, mistysTearsCards[0].SetCode)
+	}
+}
