@@ -252,6 +252,10 @@ Optional admin key authentication protects collection modification endpoints:
   - `PriceLanguage`: Which language's price was actually used
   - `IsFallback`: True if price is from a different language than requested
   - Collection variants include `price_language` and `price_fallback` fields to indicate when Japanese cards are priced using English market data
+- **Language-specific pricing limitations:**
+  - **Japanese Pokemon**: Separate product line on TCGPlayer with unique TCGPlayerIDs. Japanese cards need proper `jp-*` card IDs to get accurate prices. Use `fetch-japanese-cards` tool to populate Japanese card data.
+  - **German/French/Italian Pokemon**: TCGPlayer does NOT sell these as separate products. No pricing data available from JustTCG. These cards always fall back to English prices.
+  - **MTG (all languages)**: Multi-language variants ARE available from JustTCG via the same ScryfallID lookup. Works correctly.
 - Viewing card prices (`GET /cards/:id/prices`) auto-queues refresh if stale
 
 ### Price Worker
@@ -404,6 +408,33 @@ Cards support multiple printing variants via the `PrintingType` enum:
 
 ## Pokemon Data
 
-Pokemon TCG data is stored at `$POKEMON_DATA_DIR/pokemon-tcg-data-master/`:
+Pokemon TCG data is stored at `$POKEMON_DATA_DIR/`:
+
+**English Cards** (`pokemon-tcg-data-master/`):
 - Auto-downloaded from GitHub on first server startup
 - Contains card JSON files organized by set (e.g., `cards/en/swsh4.json`)
+
+**Japanese Cards** (`pokemon-tcg-data-japan/`):
+- Fetched from JustTCG API using `fetch-japanese-cards` tool
+- Contains Japanese-exclusive sets with proper TCGPlayerIDs for accurate pricing
+- Card IDs prefixed with `jp-` (e.g., `jp-gold-silver-to-a-new-world-lugia`)
+- Structure: `sets.json` + `cards/<set-id>.json`
+
+**Fetching Japanese Cards:**
+```bash
+# Fetch specific set
+go run cmd/fetch-japanese-cards/main.go -output=./data/pokemon-tcg-data/pokemon-tcg-data-japan -set=gold-silver-to-a-new-world-pokemon-japan
+
+# Resume fetching all sets (skips already-fetched)
+go run cmd/fetch-japanese-cards/main.go -output=./data/pokemon-tcg-data/pokemon-tcg-data-japan -resume
+```
+
+**Migration Tool for Existing Collection:**
+Japanese collection items initially added with English card IDs (e.g., `neo1-53`) need migration to Japanese card IDs (e.g., `jp-gold-silver-to-a-new-world-chikorita`) for accurate pricing:
+```bash
+# Preview migration
+go run cmd/migrate-japanese-collection/main.go -db=./data/tcg_tracker.db -data=./data -dry-run
+
+# Execute migration with interactive prompts
+go run cmd/migrate-japanese-collection/main.go -db=./data/tcg_tracker.db -data=./data -execute
+```

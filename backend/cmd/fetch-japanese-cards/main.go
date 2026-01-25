@@ -1,7 +1,7 @@
 // fetch-japanese-cards fetches Pokemon Japan card data from JustTCG API
 // and outputs JSON files compatible with the pokemon-tcg-data format.
 //
-// Usage: go run main.go -api-key=<key> -output=<dir> [-set=<set-id>]
+// Usage: go run main.go -api-key=<key> -output=<dir> [-set=<set-id>] [-resume] [-force]
 //
 // This tool creates:
 //   - <output>/sets.json - List of all Japanese sets
@@ -9,6 +9,11 @@
 //
 // The output format matches pokemon-tcg-data structure so PokemonHybridService
 // can load Japanese cards alongside English cards.
+//
+// Resume mode (-resume): Skips sets that already have card files, allowing
+// the fetch to be spread across multiple days due to API limits.
+//
+// Force mode (-force): Re-fetches all sets even if card files exist.
 package main
 
 import (
@@ -28,7 +33,8 @@ import (
 const (
 	justTCGBaseURL = "https://api.justtcg.com/v1"
 	// Rate limit: 50 requests per minute for paid tier
-	requestDelay = 1200 * time.Millisecond
+	// Using 1500ms = 40 requests/minute to stay under limit
+	requestDelay = 1500 * time.Millisecond
 )
 
 // JustTCG API response structures
@@ -73,6 +79,15 @@ type JustTCGUsage struct {
 	APIDailyRequestsRemaining int `json:"apiDailyRequestsRemaining"`
 }
 
+// FetchStats tracks progress and API usage
+type FetchStats struct {
+	SetsTotal   int
+	SetsFetched int
+	SetsSkipped int
+	SetsFailed  int
+	CardsTotal  int
+}
+
 // Output structures (pokemon-tcg-data compatible)
 type OutputSet struct {
 	ID          string `json:"id"`
@@ -102,15 +117,32 @@ type OutputCardImages struct {
 }
 
 type Fetcher struct {
-	apiKey string
-	client *http.Client
+	apiKey       string
+	client       *http.Client
+	lastUsage    JustTCGUsage
+	requestsMade int
+	minRemaining int // Stop if remaining drops below this
 }
 
-func NewFetcher(apiKey string) *Fetcher {
+func NewFetcher(apiKey string, minRemaining int) *Fetcher {
 	return &Fetcher{
-		apiKey: apiKey,
-		client: &http.Client{Timeout: 30 * time.Second},
+		apiKey:       apiKey,
+		client:       &http.Client{Timeout: 30 * time.Second},
+		minRemaining: minRemaining,
 	}
+}
+
+func (f *Fetcher) updateUsage(usage JustTCGUsage) {
+	f.lastUsage = usage
+	f.requestsMade++
+}
+
+func (f *Fetcher) canContinue() bool {
+	// Always allow at least one request to check quota
+	if f.requestsMade == 0 {
+		return true
+	}
+	return f.lastUsage.APIDailyRequestsRemaining > f.minRemaining
 }
 
 func (f *Fetcher) doRequest(reqURL string) ([]byte, error) {
@@ -128,7 +160,19 @@ func (f *Fetcher) doRequest(reqURL string) ([]byte, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, resp.Status)
+		// Read response body for error details
+		errBody := make([]byte, 0)
+		buf := make([]byte, 4096)
+		for {
+			n, err := resp.Body.Read(buf)
+			if n > 0 {
+				errBody = append(errBody, buf[:n]...)
+			}
+			if err != nil {
+				break
+			}
+		}
+		return nil, fmt.Errorf("HTTP %d: %s - %s", resp.StatusCode, resp.Status, string(errBody))
 	}
 
 	body := make([]byte, 0)
@@ -161,6 +205,7 @@ func (f *Fetcher) fetchSets() ([]JustTCGSet, error) {
 		return nil, fmt.Errorf("API error: %s", resp.Error)
 	}
 
+	f.updateUsage(resp.Metadata)
 	log.Printf("API usage: %d/%d daily requests remaining",
 		resp.Metadata.APIDailyRequestsRemaining,
 		resp.Metadata.APIDailyRequestsRemaining+resp.Metadata.APIDailyRequestsUsed)
@@ -171,9 +216,13 @@ func (f *Fetcher) fetchSets() ([]JustTCGSet, error) {
 func (f *Fetcher) fetchCardsForSet(setID string) ([]JustTCGCard, error) {
 	var allCards []JustTCGCard
 	offset := 0
-	limit := 100
+	limit := 20 // JustTCG API limit for /cards endpoint
 
 	for {
+		if !f.canContinue() {
+			return nil, fmt.Errorf("daily API limit reached (remaining: %d)", f.lastUsage.APIDailyRequestsRemaining)
+		}
+
 		params := url.Values{}
 		params.Set("game", "Pokemon Japan")
 		params.Set("set", setID)
@@ -195,6 +244,7 @@ func (f *Fetcher) fetchCardsForSet(setID string) ([]JustTCGCard, error) {
 			return nil, fmt.Errorf("API error: %s", resp.Error)
 		}
 
+		f.updateUsage(resp.Metadata)
 		allCards = append(allCards, resp.Data...)
 
 		if resp.Meta == nil || !resp.Meta.HasMore {
@@ -296,10 +346,39 @@ func convertCard(setID string, card JustTCGCard) OutputCard {
 	}
 }
 
+// setFileExists checks if a set's card file already exists and has content
+func setFileExists(cardsDir, setID string) bool {
+	cardFile := filepath.Join(cardsDir, setID+".json")
+	info, err := os.Stat(cardFile)
+	if err != nil {
+		return false
+	}
+	return info.Size() > 10 // File exists and has meaningful content
+}
+
+// loadExistingSets loads the existing sets.json if it exists
+func loadExistingSets(setsFile string) ([]OutputSet, error) {
+	data, err := os.ReadFile(setsFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var sets []OutputSet
+	if err := json.Unmarshal(data, &sets); err != nil {
+		return nil, err
+	}
+	return sets, nil
+}
+
 func main() {
 	apiKey := flag.String("api-key", "", "JustTCG API key (required)")
 	outputDir := flag.String("output", "", "Output directory (required)")
 	specificSet := flag.String("set", "", "Fetch only this set (optional, e.g., 'leaders-stadium-pokemon-japan')")
+	resume := flag.Bool("resume", false, "Skip sets that already have card files (for resuming)")
+	force := flag.Bool("force", false, "Re-fetch all sets even if card files exist")
+	minRemaining := flag.Int("min-remaining", 50, "Stop when API requests remaining drops below this")
 	flag.Parse()
 
 	if *apiKey == "" {
@@ -308,19 +387,33 @@ func main() {
 	}
 
 	if *apiKey == "" || *outputDir == "" {
-		fmt.Println("Usage: fetch-japanese-cards -api-key=<key> -output=<dir> [-set=<set-id>]")
+		fmt.Println("Usage: fetch-japanese-cards -api-key=<key> -output=<dir> [options]")
 		fmt.Println("")
 		fmt.Println("Fetches Pokemon Japan card data from JustTCG API and outputs")
 		fmt.Println("JSON files compatible with pokemon-tcg-data format.")
 		fmt.Println("")
 		fmt.Println("Options:")
-		fmt.Println("  -api-key  JustTCG API key (or set JUSTTCG_API_KEY env var)")
-		fmt.Println("  -output   Output directory for JSON files")
-		fmt.Println("  -set      Fetch only specific set (optional)")
+		fmt.Println("  -api-key        JustTCG API key (or set JUSTTCG_API_KEY env var)")
+		fmt.Println("  -output         Output directory for JSON files")
+		fmt.Println("  -set            Fetch only specific set (optional)")
+		fmt.Println("  -resume         Skip sets that already have card files")
+		fmt.Println("  -force          Re-fetch all sets even if card files exist")
+		fmt.Println("  -min-remaining  Stop when API requests remaining drops below this (default: 50)")
+		fmt.Println("")
+		fmt.Println("Examples:")
+		fmt.Println("  # Fetch all sets (will stop at API limit, resume tomorrow)")
+		fmt.Println("  fetch-japanese-cards -output=./data -resume")
+		fmt.Println("")
+		fmt.Println("  # Fetch specific priority set")
+		fmt.Println("  fetch-japanese-cards -output=./data -set=gold-silver-to-a-new-world-pokemon-japan")
 		os.Exit(1)
 	}
 
-	fetcher := NewFetcher(*apiKey)
+	if *resume && *force {
+		log.Fatal("Cannot use both -resume and -force flags")
+	}
+
+	fetcher := NewFetcher(*apiKey, *minRemaining)
 
 	// Create output directories
 	cardsDir := filepath.Join(*outputDir, "cards")
@@ -334,7 +427,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to fetch sets: %v", err)
 	}
-	log.Printf("Found %d Japanese sets", len(sets))
+	log.Printf("Found %d Japanese sets on JustTCG", len(sets))
 
 	// Filter to specific set if requested
 	if *specificSet != "" {
@@ -351,51 +444,117 @@ func main() {
 		sets = filtered
 	}
 
-	// Convert and save sets
-	var outputSets []OutputSet
-	for _, s := range sets {
-		outputSets = append(outputSets, OutputSet{
-			ID:     convertSetID(s.ID),
-			Name:   s.Name,
-			Series: "Pokemon Japan", // Group all JP sets under one series
-		})
+	// Load existing sets.json to preserve totals
+	setsFile := filepath.Join(*outputDir, "sets.json")
+	existingSets, _ := loadExistingSets(setsFile)
+	existingSetMap := make(map[string]*OutputSet)
+	for i := range existingSets {
+		existingSetMap[existingSets[i].ID] = &existingSets[i]
 	}
 
+	// Build output sets list (preserving existing totals)
+	var outputSets []OutputSet
+	for _, s := range sets {
+		setID := convertSetID(s.ID)
+		if existing, ok := existingSetMap[setID]; ok {
+			outputSets = append(outputSets, *existing)
+		} else {
+			outputSets = append(outputSets, OutputSet{
+				ID:     setID,
+				Name:   s.Name,
+				Series: "Pokemon Japan",
+			})
+		}
+	}
+
+	// Count how many sets need fetching
+	var setsToFetch []JustTCGSet
+	var setsSkipped int
+	for _, set := range sets {
+		setID := convertSetID(set.ID)
+		if *resume && setFileExists(cardsDir, setID) {
+			setsSkipped++
+			continue
+		}
+		setsToFetch = append(setsToFetch, set)
+	}
+
+	if *resume && setsSkipped > 0 {
+		log.Printf("Resume mode: %d sets already fetched, %d remaining", setsSkipped, len(setsToFetch))
+	}
+
+	if len(setsToFetch) == 0 {
+		log.Println("All sets already fetched! Use -force to re-fetch.")
+		// Still save the sets.json to ensure it's up to date
+		setsJSON, err := json.MarshalIndent(outputSets, "", "  ")
+		if err != nil {
+			log.Printf("Warning: failed to marshal sets: %v", err)
+			return
+		}
+		if err := os.WriteFile(setsFile, setsJSON, 0644); err != nil {
+			log.Printf("Warning: failed to write sets file: %v", err)
+		}
+		return
+	}
+
+	// Save initial sets.json
 	setsJSON, err := json.MarshalIndent(outputSets, "", "  ")
 	if err != nil {
 		log.Fatalf("Failed to marshal sets: %v", err)
 	}
-	setsFile := filepath.Join(*outputDir, "sets.json")
 	if err := os.WriteFile(setsFile, setsJSON, 0644); err != nil {
 		log.Fatalf("Failed to write sets file: %v", err)
 	}
 	log.Printf("Wrote %s (%d sets)", setsFile, len(outputSets))
 
+	// Track stats
+	stats := FetchStats{
+		SetsTotal:   len(setsToFetch),
+		SetsSkipped: setsSkipped,
+	}
+
 	// Fetch cards for each set
-	for i, set := range sets {
-		log.Printf("[%d/%d] Fetching cards for %s...", i+1, len(sets), set.Name)
+	for i, set := range setsToFetch {
+		setID := convertSetID(set.ID)
+
+		// Check if we should stop due to API limits
+		if !fetcher.canContinue() {
+			log.Printf("\n=== API limit reached (remaining: %d) ===", fetcher.lastUsage.APIDailyRequestsRemaining)
+			log.Printf("Progress: %d/%d sets fetched", stats.SetsFetched, stats.SetsTotal)
+			log.Printf("Run again with -resume to continue tomorrow")
+			break
+		}
+
+		log.Printf("[%d/%d] Fetching cards for %s...", i+1, len(setsToFetch), set.Name)
 
 		time.Sleep(requestDelay) // Rate limiting between sets
 
 		cards, err := fetcher.fetchCardsForSet(set.ID)
 		if err != nil {
+			if strings.Contains(err.Error(), "API limit") {
+				log.Printf("\n=== %v ===", err)
+				log.Printf("Progress: %d/%d sets fetched", stats.SetsFetched, stats.SetsTotal)
+				log.Printf("Run again with -resume to continue tomorrow")
+				break
+			}
 			log.Printf("Warning: failed to fetch cards for %s: %v", set.ID, err)
+			stats.SetsFailed++
 			continue
 		}
 
 		if len(cards) == 0 {
 			log.Printf("  No cards found, skipping")
+			stats.SetsFailed++
 			continue
 		}
 
 		// Convert cards
-		setID := convertSetID(set.ID)
 		var outputCards []OutputCard
 		for _, card := range cards {
 			outputCards = append(outputCards, convertCard(setID, card))
 		}
 
-		// Update set total
+		// Update set total in outputSets
 		for j := range outputSets {
 			if outputSets[j].ID == setID {
 				outputSets[j].Total = len(outputCards)
@@ -407,16 +566,21 @@ func main() {
 		cardsJSON, err := json.MarshalIndent(outputCards, "", "  ")
 		if err != nil {
 			log.Printf("Warning: failed to marshal cards for %s: %v", set.ID, err)
+			stats.SetsFailed++
 			continue
 		}
 
 		cardFile := filepath.Join(cardsDir, setID+".json")
 		if err := os.WriteFile(cardFile, cardsJSON, 0644); err != nil {
 			log.Printf("Warning: failed to write cards file %s: %v", cardFile, err)
+			stats.SetsFailed++
 			continue
 		}
 
-		log.Printf("  Wrote %s (%d cards)", cardFile, len(outputCards))
+		stats.SetsFetched++
+		stats.CardsTotal += len(outputCards)
+		log.Printf("  Wrote %s (%d cards) [API: %d remaining]",
+			cardFile, len(outputCards), fetcher.lastUsage.APIDailyRequestsRemaining)
 	}
 
 	// Re-save sets with updated totals
@@ -425,5 +589,19 @@ func main() {
 		log.Printf("Warning: failed to update sets file: %v", err)
 	}
 
-	log.Println("Done!")
+	// Print summary
+	fmt.Println("")
+	fmt.Println("=== Fetch Summary ===")
+	fmt.Printf("Sets fetched:  %d\n", stats.SetsFetched)
+	fmt.Printf("Sets skipped:  %d (already existed)\n", stats.SetsSkipped)
+	fmt.Printf("Sets failed:   %d\n", stats.SetsFailed)
+	fmt.Printf("Cards total:   %d\n", stats.CardsTotal)
+	fmt.Printf("API requests:  %d made, %d remaining\n", fetcher.requestsMade, fetcher.lastUsage.APIDailyRequestsRemaining)
+
+	if stats.SetsFetched+stats.SetsSkipped < len(sets) {
+		fmt.Printf("\nNote: %d sets remaining. Run with -resume to continue.\n",
+			len(sets)-stats.SetsFetched-stats.SetsSkipped)
+	} else {
+		fmt.Println("\nDone! All sets fetched.")
+	}
 }

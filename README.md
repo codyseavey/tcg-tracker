@@ -225,6 +225,47 @@ The system uses a two-tier OCR approach for card identification:
   3. Gemini 3 Flash text (if GOOGLE_API_KEY configured)
   4. Google Cloud Translation API (fallback if Gemini unavailable or low confidence)
 
+## Japanese Pokemon Card Tools
+
+The backend includes tools for managing Japanese Pokemon card data:
+
+### Fetching Japanese Card Data
+
+Japanese Pokemon cards are a separate product line on TCGPlayer with unique TCGPlayerIDs. Use the fetch tool to populate Japanese card data from JustTCG:
+
+```bash
+cd backend
+
+# Fetch a specific set
+go run cmd/fetch-japanese-cards/main.go -output=./data/pokemon-tcg-data/pokemon-tcg-data-japan -set=gold-silver-to-a-new-world-pokemon-japan
+
+# Resume fetching all sets (skips already-fetched)
+go run cmd/fetch-japanese-cards/main.go -output=./data/pokemon-tcg-data/pokemon-tcg-data-japan -resume
+```
+
+**Note:** JustTCG has 420 Japanese sets. Due to API rate limits (50 req/min, 1000 req/day), fetching all sets takes ~2 days.
+
+### Migrating Collection Items
+
+If you have Japanese cards in your collection that were added with English card IDs, migrate them to proper Japanese IDs for accurate pricing:
+
+```bash
+cd backend
+
+# Preview migration
+go run cmd/migrate-japanese-collection/main.go -db=./data/tcg_tracker.db -data=./data -dry-run
+
+# Execute migration with interactive prompts
+go run cmd/migrate-japanese-collection/main.go -db=./data/tcg_tracker.db -data=./data -execute
+```
+
+### Language-Specific Pricing Limitations
+
+| Language | Pokemon | MTG |
+|----------|---------|-----|
+| Japanese | Separate TCGPlayerIDs, requires `jp-*` card IDs | Works via ScryfallID |
+| German/French/Italian | **No pricing available** (falls back to English) | Works via ScryfallID |
+
 ## External APIs
 
 ### Scryfall (MTG)
@@ -233,10 +274,11 @@ The system uses a two-tier OCR approach for card identification:
 - Documentation: https://scryfall.com/docs/api
 
 ### JustTCG (Pricing)
-- Provides condition-specific pricing for Pokemon cards
+- Provides condition-specific pricing for Pokemon and MTG cards
 - API key required
 - Daily limit configurable via `JUSTTCG_DAILY_LIMIT` (free tier 100/day, paid tier 1000/day)
-- Batch pricing uses TCGPlayerIDs for up to 100 cards per request
+- Batch pricing uses TCGPlayerIDs (Pokemon) or ScryfallIDs (MTG) for up to 100 cards per request
+- Pokemon Japan is a separate game with unique TCGPlayerIDs
 
 ## Monitoring
 
