@@ -292,7 +292,6 @@ func (h *CardHandler) IdentifyCardFromImage(c *gin.Context) {
 	// Validate that card_id matches the identified name to catch Gemini hallucinations
 	// e.g., Gemini says "Poké Ball #96" but returns card_id for "Double Colorless Energy #96"
 	validatedCardID := result.CardID
-	var mismatchDetected bool
 	if result.CardID != "" && result.CanonicalNameEN != "" {
 		if resolvedCard := resolveCard(result.CardID, result.Game); resolvedCard != nil {
 			if !cardNameMatches(resolvedCard.Name, result.CanonicalNameEN) {
@@ -300,7 +299,6 @@ func (h *CardHandler) IdentifyCardFromImage(c *gin.Context) {
 					result.CanonicalNameEN, result.CardID, resolvedCard.Name)
 				// Clear the card_id since it doesn't match - we'll search by name instead
 				validatedCardID = ""
-				mismatchDetected = true
 			}
 		}
 	}
@@ -323,15 +321,16 @@ func (h *CardHandler) IdentifyCardFromImage(c *gin.Context) {
 	// Always build a cards array for the client to display
 	var cards []models.Card
 
-	// If we have a validated card ID, fetch the primary match
+	// If we have a validated card ID, fetch the primary match and put it first
 	if validatedCardID != "" {
 		if card := resolveCard(validatedCardID, result.Game); card != nil {
 			cards = append(cards, *card)
 		}
 	}
 
-	// If Gemini returned a mismatched card_id OR no card_id, search by name to find candidates
-	if (mismatchDetected || validatedCardID == "") && result.CanonicalNameEN != "" {
+	// ALWAYS search by name to populate candidates so user can pick the right printing/set
+	// This handles: exact match (user picks from variants), mismatch, timeout, low confidence
+	if result.CanonicalNameEN != "" {
 		searchName := result.CanonicalNameEN
 		var searchResult *models.CardSearchResult
 		var err error
@@ -343,12 +342,12 @@ func (h *CardHandler) IdentifyCardFromImage(c *gin.Context) {
 		}
 
 		if err == nil && searchResult != nil {
-			// Add search results as candidates (limit to 10 to avoid overwhelming the UI)
+			// Add search results as candidates (limit to 20 to give user good selection)
 			for i, card := range searchResult.Cards {
-				if i >= 10 {
+				if i >= 20 {
 					break
 				}
-				// Don't add duplicates
+				// Don't add duplicates (primary match was already added above)
 				isDupe := false
 				for _, existing := range cards {
 					if existing.ID == card.ID {
