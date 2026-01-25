@@ -40,6 +40,9 @@ COPY --from=backend-builder /app/server .
 # Copy frontend build
 COPY --from=frontend-builder /frontend/dist ./frontend/dist
 
+# Copy bundled Japanese Pokemon data (will be copied to data dir on startup if missing)
+COPY --from=backend-builder /app/data/pokemon-tcg-data-japan ./bundled-data/pokemon-tcg-data-japan
+
 # Create data directory
 RUN mkdir -p /app/data
 
@@ -47,6 +50,7 @@ RUN mkdir -p /app/data
 ENV PORT=8080
 ENV DB_PATH=/app/data/tcg.db
 ENV FRONTEND_DIST_PATH=/app/frontend/dist
+ENV BUNDLED_POKEMON_DATA_DIR=/app/bundled-data
 
 EXPOSE 8080
 

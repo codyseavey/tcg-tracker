@@ -285,8 +285,25 @@ func (s *PokemonHybridService) loadData(dataDir string) error {
 
 	englishCount := len(s.cards)
 
-	// Load Japanese card data if available
+	// Check if Japanese data exists, copy from bundled if not
 	japanDataPath := filepath.Join(dataDir, "pokemon-tcg-data-japan")
+	if _, err := os.Stat(japanDataPath); os.IsNotExist(err) {
+		// Try to copy from bundled data (Docker image includes this)
+		bundledDir := os.Getenv("BUNDLED_POKEMON_DATA_DIR")
+		if bundledDir != "" {
+			bundledJapanPath := filepath.Join(bundledDir, "pokemon-tcg-data-japan")
+			if _, err := os.Stat(bundledJapanPath); err == nil {
+				log.Printf("Copying bundled Japanese Pokemon data to %s...", japanDataPath)
+				if err := copyDir(bundledJapanPath, japanDataPath); err != nil {
+					log.Printf("Warning: failed to copy bundled Japanese data: %v", err)
+				} else {
+					log.Printf("Japanese Pokemon data copied successfully.")
+				}
+			}
+		}
+	}
+
+	// Load Japanese card data if available
 	if _, err := os.Stat(japanDataPath); err == nil {
 		// Load Japanese sets
 		japanSetsFile := filepath.Join(japanDataPath, "sets.json")
@@ -1829,6 +1846,66 @@ func extractZip(zipPath, destDir string) error {
 		if err != nil {
 			return err
 		}
+	}
+
+	return nil
+}
+
+// copyDir recursively copies a directory from src to dst
+func copyDir(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return fmt.Errorf("failed to stat source: %w", err)
+	}
+
+	if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+		return fmt.Errorf("failed to create destination: %w", err)
+	}
+
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return fmt.Errorf("failed to read source directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		if entry.IsDir() {
+			if err := copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+		} else {
+			if err := copyFile(srcPath, dstPath); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// copyFile copies a single file from src to dst
+func copyFile(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("failed to open source file: %w", err)
+	}
+	defer srcFile.Close()
+
+	srcInfo, err := srcFile.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat source file: %w", err)
+	}
+
+	dstFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, srcInfo.Mode())
+	if err != nil {
+		return fmt.Errorf("failed to create destination file: %w", err)
+	}
+	defer dstFile.Close()
+
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		return fmt.Errorf("failed to copy file contents: %w", err)
 	}
 
 	return nil
