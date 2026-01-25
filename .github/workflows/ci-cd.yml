@@ -179,6 +179,12 @@ jobs:
           ssh $PROD_USER@$PROD_HOST "cp -f /home/cody/google-cloud-adminSvc.json $APP_DIR/secrets/gcloud.json 2>/dev/null || true"
           ssh $PROD_USER@$PROD_HOST "echo 'IMAGE_TAG=${{ github.sha }}' > $APP_DIR/.env.deploy"
 
+      - name: Copy Japanese Pokemon card data to production
+        run: |
+          # Japanese card data is checked into repo - sync to production
+          # This data has different artwork than English cards (e.g., Misty's Tears)
+          rsync -av --delete backend/data/pokemon-tcg-data-japan/ $PROD_USER@$PROD_HOST:$APP_DIR/data/pokemon-tcg-data/pokemon-tcg-data-japan/
+
       - name: Login to GHCR on production server
         run: |
           ssh $PROD_USER@$PROD_HOST "echo '${{ secrets.GH_ACTIONS_READ_TOKEN }}' | docker login ghcr.io -u codyseavey --password-stdin"
