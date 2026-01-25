@@ -183,7 +183,8 @@ jobs:
         run: |
           # Japanese card data is checked into repo - sync to production
           # This data has different artwork than English cards (e.g., Misty's Tears)
-          rsync -av --delete backend/data/pokemon-tcg-data-japan/ $PROD_USER@$PROD_HOST:$APP_DIR/data/pokemon-tcg-data/pokemon-tcg-data-japan/
+          ssh $PROD_USER@$PROD_HOST "mkdir -p $APP_DIR/data/pokemon-tcg-data/pokemon-tcg-data-japan/cards"
+          scp -r backend/data/pokemon-tcg-data-japan/* $PROD_USER@$PROD_HOST:$APP_DIR/data/pokemon-tcg-data/pokemon-tcg-data-japan/
 
       - name: Login to GHCR on production server
         run: |
