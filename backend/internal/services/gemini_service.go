@@ -84,6 +84,8 @@ type IdentificationResult struct {
 	Number          string          `json:"card_number"`                 // Card number
 	Game            string          `json:"game"`                        // "pokemon" or "mtg"
 	ObservedLang    string          `json:"observed_language,omitempty"` // Language observed on card (e.g., "Japanese", "English")
+	IsFoil          bool            `json:"is_foil"`                     // Whether the card appears to be foil/holo
+	IsFirstEdition  bool            `json:"is_first_edition"`            // Whether the card has a 1st Edition stamp (Pokemon)
 	Confidence      float64         `json:"confidence"`                  // 0-1 confidence score
 	Reasoning       string          `json:"reasoning"`                   // Gemini's explanation
 	TurnsUsed       int             `json:"turns_used"`                  // Number of API turns used
@@ -713,6 +715,18 @@ LANGUAGE DETECTION:
 - German: "KP" for HP
 - French: "PV" for HP
 
+FOIL/HOLO DETECTION:
+- Look for holographic/rainbow/shiny patterns on the card surface
+- Foil cards often have a reflective sheen, rainbow gradients, or sparkle effects
+- Check if the artwork area or card border has holographic elements
+- Set "is_foil": true if the card appears to be foil/holo/holographic
+
+FIRST EDITION DETECTION (Pokemon only):
+- Look for "1st Edition" stamp/text on the card (usually on the left side below the artwork)
+- First edition cards have a black "Edition 1" or "1" symbol
+- This applies to older Pokemon sets (Base Set, Jungle, Fossil, Team Rocket, etc.)
+- Set "is_first_edition": true if you see the 1st Edition stamp
+
 When you have VIEWED and VERIFIED artwork match, respond with JSON:
 {
   "card_id": "the card ID (only if you called view_card_image and verified match)",
@@ -723,6 +737,8 @@ When you have VIEWED and VERIFIED artwork match, respond with JSON:
   "card_number": "collector number from the scanned card",
   "game": "pokemon" or "mtg",
   "observed_language": "English" or "Japanese" or "German" etc.",
+  "is_foil": true/false,
+  "is_first_edition": true/false,
   "confidence": 0.0-1.0,
   "reasoning": "MUST describe the artwork comparison you performed"
 }
@@ -734,6 +750,8 @@ If you did not find a match or could not verify after viewing candidates:
   "canonical_name_en": "English translation of the name",
   "game": "pokemon" or "mtg",
   "observed_language": "detected language",
+  "is_foil": true/false,
+  "is_first_edition": true/false,
   "confidence": 0.0,
   "reasoning": "Explain what images you compared and why none matched",
   "candidates": [{"id": "card-id", "name": "Card Name"}, ...]

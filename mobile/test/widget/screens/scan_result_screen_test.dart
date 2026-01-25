@@ -432,6 +432,8 @@ void main() {
             cardNumber: '001',
             game: 'pokemon',
             observedLanguage: 'English',
+            isFoil: false,
+            isFirstEdition: false,
             confidence: 0.8,
             reasoning: 'Test',
             turnsUsed: 1,

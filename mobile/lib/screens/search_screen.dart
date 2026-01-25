@@ -44,7 +44,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 TextField(
                   controller: _searchController,
                   decoration: InputDecoration(
-                    hintText: 'Search card name...',
+                    hintText: 'Search by card name or set...',
                     prefixIcon: const Icon(Icons.search),
                     suffixIcon: _searchController.text.isNotEmpty
                         ? IconButton(
@@ -73,10 +73,7 @@ class _SearchScreenState extends State<SearchScreen> {
                             value: 'pokemon',
                             label: Text('Pokemon'),
                           ),
-                          ButtonSegment(
-                            value: 'mtg',
-                            label: Text('MTG'),
-                          ),
+                          ButtonSegment(value: 'mtg', label: Text('MTG')),
                         ],
                         selected: {_selectedGame},
                         onSelectionChanged: (selection) {
@@ -123,16 +120,9 @@ class _SearchScreenState extends State<SearchScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.error_outline,
-              size: 64,
-              color: theme.colorScheme.error,
-            ),
+            Icon(Icons.error_outline, size: 64, color: theme.colorScheme.error),
             const SizedBox(height: 16),
-            Text(
-              'Search failed',
-              style: theme.textTheme.titleMedium,
-            ),
+            Text('Search failed', style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
             Text(
               provider.searchError!,
@@ -140,10 +130,7 @@ class _SearchScreenState extends State<SearchScreen> {
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 16),
-            FilledButton(
-              onPressed: _performSearch,
-              child: const Text('Retry'),
-            ),
+            FilledButton(onPressed: _performSearch, child: const Text('Retry')),
           ],
         ),
       );
@@ -246,7 +233,7 @@ class _SearchScreenState extends State<SearchScreen> {
             Text(
               hasSearched
                   ? 'Try a different search term'
-                  : 'Enter a card name to search',
+                  : 'Enter a card name or set name to search',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -275,9 +262,7 @@ class _SearchScreenState extends State<SearchScreen> {
   void _openCardDetail(BuildContext context, dynamic card) {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (context) => CardDetailScreen(card: card),
-      ),
+      MaterialPageRoute(builder: (context) => CardDetailScreen(card: card)),
     );
   }
 }

@@ -62,7 +62,14 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
     super.initState();
     _apiService = widget.apiService ?? ApiService();
     _condition = 'NM';
-    _printing = PrintingType.normal;
+    // Default printing based on Gemini detection
+    if (widget.geminiResult.isFirstEdition) {
+      _printing = PrintingType.firstEdition;
+    } else if (widget.geminiResult.isFoil) {
+      _printing = PrintingType.foil;
+    } else {
+      _printing = PrintingType.normal;
+    }
     // Default language to what Gemini observed
     _language = widget.geminiResult.observedLanguage.isNotEmpty
         ? widget.geminiResult.observedLanguage
@@ -391,47 +398,117 @@ class _ScanResultScreenState extends State<ScanResultScreen> {
                 color: Theme.of(context).colorScheme.onPrimaryContainer,
               ),
             ),
-            // Language badge if non-English
-            if (result.isNonEnglish) ...[
+            // Badge row for language, foil, first edition
+            if (result.isNonEnglish ||
+                result.isFoil ||
+                result.isFirstEdition) ...[
               const SizedBox(height: 8),
-              Row(
+              Wrap(
+                spacing: 8,
+                runSpacing: 4,
                 children: [
-                  Icon(
-                    Icons.language,
-                    size: 16,
-                    color: Theme.of(context).colorScheme.onPrimaryContainer,
-                  ),
-                  const SizedBox(width: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 2,
+                  // Language badge if non-English
+                  if (result.isNonEnglish)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.tertiaryContainer,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _getLanguageFlag(result.observedLanguage),
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            result.observedLanguage,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onTertiaryContainer,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.tertiaryContainer,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          _getLanguageFlag(result.observedLanguage),
-                          style: const TextStyle(fontSize: 14),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          result.observedLanguage,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
+                  // Foil badge
+                  if (result.isFoil)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.secondaryContainer,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.auto_awesome,
+                            size: 14,
                             color: Theme.of(
                               context,
-                            ).colorScheme.onTertiaryContainer,
+                            ).colorScheme.onSecondaryContainer,
                           ),
-                        ),
-                      ],
+                          const SizedBox(width: 4),
+                          Text(
+                            'Foil',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSecondaryContainer,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
+                  // First Edition badge
+                  if (result.isFirstEdition)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.looks_one,
+                            size: 14,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onPrimaryContainer,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            '1st Edition',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onPrimaryContainer,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ],

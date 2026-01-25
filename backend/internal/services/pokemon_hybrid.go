@@ -421,6 +421,36 @@ func (s *PokemonHybridService) SearchCards(query string) (*models.CardSearchResu
 		}
 	}
 
+	// Third pass: Search by set name (if query looks like a set name and not enough results)
+	// Only do this if we have fewer than 20 results from card name matching
+	if len(scored) < 20 {
+		for setID, set := range s.sets {
+			setNameLower := strings.ToLower(set.Name)
+			setScore := 0
+
+			// Exact set name match
+			if setNameLower == queryLower {
+				setScore = 350
+			} else if strings.Contains(setNameLower, queryLower) {
+				// Partial set name match (e.g., "vivid" matches "Vivid Voltage")
+				setScore = 300
+			} else if strings.Contains(queryLower, setNameLower) {
+				// Query contains set name
+				setScore = 250
+			}
+
+			if setScore > 0 {
+				// Add all cards from this set
+				for idx, card := range s.cards {
+					if card.SetID == setID && !seen[idx] {
+						seen[idx] = true
+						scored = append(scored, scoredMatch{idx: idx, score: setScore})
+					}
+				}
+			}
+		}
+	}
+
 	// Sort by score (descending), then by name for consistency
 	sort.Slice(scored, func(i, j int) bool {
 		if scored[i].score != scored[j].score {

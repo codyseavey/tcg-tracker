@@ -27,6 +27,12 @@ class GeminiScanResult {
   /// Language observed on the physical card (e.g., "Japanese", "English", "German")
   final String observedLanguage;
 
+  /// Whether the card appears to be foil/holo
+  final bool isFoil;
+
+  /// Whether the card has a 1st Edition stamp (Pokemon only)
+  final bool isFirstEdition;
+
   /// Confidence score 0.0-1.0
   final double confidence;
 
@@ -49,6 +55,8 @@ class GeminiScanResult {
     required this.cardNumber,
     required this.game,
     required this.observedLanguage,
+    required this.isFoil,
+    required this.isFirstEdition,
     required this.confidence,
     required this.reasoning,
     required this.turnsUsed,
@@ -65,6 +73,8 @@ class GeminiScanResult {
       cardNumber: json['card_number'] ?? '',
       game: json['game'] ?? 'unknown',
       observedLanguage: json['observed_language'] ?? 'English',
+      isFoil: json['is_foil'] ?? false,
+      isFirstEdition: json['is_first_edition'] ?? false,
       confidence: (json['confidence'] as num?)?.toDouble() ?? 0.0,
       reasoning: json['reasoning'] ?? '',
       turnsUsed: json['turns_used'] ?? 0,
