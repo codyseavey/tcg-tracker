@@ -50,6 +50,15 @@ func (h *CollectionHandler) GetCollection(c *gin.Context) {
 		return
 	}
 
+	// For cards not in database (Japanese cards loaded from JSON), fetch from pokemon service
+	for i := range items {
+		if items[i].Card.Name == "" && items[i].Card.ImageURL == "" {
+			if card, err := h.pokemonService.GetCard(items[i].CardID); err == nil && card != nil {
+				items[i].Card = *card
+			}
+		}
+	}
+
 	c.JSON(http.StatusOK, items)
 }
 
@@ -597,7 +606,17 @@ func (h *CollectionHandler) GetGroupedCollection(c *gin.Context) {
 	for _, item := range items {
 		cardGroups[item.CardID] = append(cardGroups[item.CardID], item)
 		if _, exists := cardMap[item.CardID]; !exists {
-			cardMap[item.CardID] = item.Card
+			// If card is empty (not in database), try to load from pokemon service
+			// This handles Japanese cards which are loaded from JSON files, not the DB
+			if item.Card.Name == "" && item.Card.ImageURL == "" {
+				if card, err := h.pokemonService.GetCard(item.CardID); err == nil && card != nil {
+					cardMap[item.CardID] = *card
+				} else {
+					cardMap[item.CardID] = item.Card
+				}
+			} else {
+				cardMap[item.CardID] = item.Card
+			}
 		}
 	}
 
