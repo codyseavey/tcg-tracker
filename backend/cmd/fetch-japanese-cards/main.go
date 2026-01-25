@@ -216,7 +216,7 @@ func (f *Fetcher) fetchSets() ([]JustTCGSet, error) {
 func (f *Fetcher) fetchCardsForSet(setID string) ([]JustTCGCard, error) {
 	var allCards []JustTCGCard
 	offset := 0
-	limit := 20 // JustTCG API limit for /cards endpoint
+	limit := 100 // JustTCG paid tier: 100 cards per request
 
 	for {
 		if !f.canContinue() {
