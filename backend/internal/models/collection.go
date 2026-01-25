@@ -51,6 +51,7 @@ type AddToCollectionRequest struct {
 }
 
 type UpdateCollectionRequest struct {
+	CardID    *string       `json:"card_id"`   // Reassign to different card
 	Quantity  *int          `json:"quantity"`
 	Condition *Condition    `json:"condition"`
 	Printing  *PrintingType `json:"printing"`

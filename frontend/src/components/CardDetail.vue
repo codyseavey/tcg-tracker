@@ -2,6 +2,7 @@
 import { ref, computed } from 'vue'
 import { priceService } from '../services/api'
 import { formatPrice, formatTimeAgo, isPriceStale as checkPriceStale } from '../utils/formatters'
+import ReassignCardModal from './ReassignCardModal.vue'
 
 const props = defineProps({
   item: {
@@ -35,6 +36,7 @@ const editQuantity = ref(1)
 const editCondition = ref('NM')
 const editPrinting = ref('Normal')
 const editLanguage = ref('English')
+const editNotes = ref('')
 
 // UI state
 const refreshingPrice = ref(false)
@@ -42,6 +44,7 @@ const priceError = ref(null)
 const priceMessage = ref(null)
 const showScannedImage = ref(false)
 const activeTab = ref('variants') // 'variants' | 'scans' | 'items'
+const reassigningItem = ref(null) // Item being reassigned to a different card
 
 const printingOptions = [
   { value: 'Normal', label: 'Normal' },
@@ -94,6 +97,46 @@ const isPriceStale = computed(() => checkPriceStale(card.value))
 const priceAge = computed(() => formatTimeAgo(card.value.price_updated_at))
 const isPokemon = computed(() => card.value.game === 'pokemon')
 
+// Pre-compute language/set errors for variants to avoid duplicate calls in template
+const variantErrors = computed(() => {
+  const errors = new Map()
+  for (const variant of variants.value) {
+    const key = `${variant.printing}-${variant.condition}-${variant.language}`
+    errors.set(key, getLanguageSetErrorForLanguage(variant.language))
+  }
+  return errors
+})
+
+// Helper to get variant error from pre-computed map
+function getVariantError(variant) {
+  const key = `${variant.printing}-${variant.condition}-${variant.language}`
+  return variantErrors.value.get(key)
+}
+
+// Internal helper for language-only check (used by variantErrors computed)
+function getLanguageSetErrorForLanguage(language) {
+  if (!card.value) return null
+
+  const cardId = card.value.id || ''
+  const lang = language || 'English'
+  const game = card.value.game
+
+  if (game !== 'pokemon') return null
+
+  const isJapaneseSet = cardId.startsWith('jp-')
+  const isJapaneseLanguage = lang === 'Japanese'
+
+  if (isJapaneseSet && !isJapaneseLanguage) {
+    return `Card is from a Japanese-exclusive set but marked as ${lang}`
+  }
+
+  if (!isJapaneseSet && isJapaneseLanguage) {
+    return 'Card is marked as Japanese but from an English set. Consider reassigning to the Japanese version.'
+  }
+
+  return null
+}
+
 // Helper to get condition label
 function getConditionLabel(value) {
   const c = conditions.find(c => c.value === value)
@@ -112,6 +155,13 @@ function getLanguageInfo(value) {
   return l || { value: value || 'English', label: value || 'English', flag: '🇺🇸' }
 }
 
+// Detect language/set mismatch errors for collection items
+// Returns error message if mismatch detected, null otherwise
+function getLanguageSetError(collectionItem) {
+  if (!collectionItem) return null
+  return getLanguageSetErrorForLanguage(collectionItem.language)
+}
+
 // Start editing an individual item
 function startEditItem(item) {
   editingItem.value = item
@@ -119,6 +169,7 @@ function startEditItem(item) {
   editCondition.value = item.condition
   editPrinting.value = item.printing
   editLanguage.value = item.language || 'English'
+  editNotes.value = item.notes || ''
   // Switch to items tab so the edit form is visible
   activeTab.value = 'items'
 }
@@ -131,13 +182,14 @@ function cancelEdit() {
 // Save edited item
 function saveEditItem() {
   if (!editingItem.value) return
-  
+
   emit('update', {
     id: editingItem.value.id,
     quantity: editQuantity.value,
     condition: editCondition.value,
     printing: editPrinting.value,
-    language: editLanguage.value
+    language: editLanguage.value,
+    notes: editNotes.value
   })
   editingItem.value = null
 }
@@ -150,6 +202,22 @@ function removeItem(item) {
   if (confirm(msg)) {
     emit('remove', item.id)
   }
+}
+
+// Start reassigning an item to a different card
+function startReassign(item) {
+  reassigningItem.value = item
+}
+
+// Handle reassignment confirmation
+function handleReassign(newCardId) {
+  if (!reassigningItem.value) return
+
+  emit('update', {
+    id: reassigningItem.value.id,
+    card_id: newCardId
+  })
+  reassigningItem.value = null
 }
 
 const refreshPrice = async () => {
@@ -381,6 +449,16 @@ const handleRemove = () => {
                   <span class="text-gray-800 dark:text-white">{{ getConditionLabel(variant.condition) }}</span>
                   <span class="text-gray-500 dark:text-gray-400">x{{ variant.quantity }}</span>
                   <span v-if="variant.has_scans" class="text-purple-500 text-xs">{{ variant.scanned_qty }} scans</span>
+                  <!-- Language/Set mismatch warning -->
+                  <span
+                    v-if="getVariantError(variant)"
+                    class="text-orange-500"
+                    :title="getVariantError(variant)"
+                  >
+                    <svg class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                    </svg>
+                  </span>
                 </div>
                 <span class="font-medium text-green-600 dark:text-green-400">{{ formatPrice(variant.value) }}</span>
               </div>
@@ -468,6 +546,16 @@ const handleRemove = () => {
                           </select>
                         </div>
                       </div>
+                      <!-- Notes field (full width) -->
+                      <div class="mt-2">
+                        <label class="text-xs text-gray-500">Notes</label>
+                        <textarea
+                          v-model="editNotes"
+                          rows="2"
+                          placeholder="Add notes about this card..."
+                          class="w-full border dark:border-gray-600 rounded px-2 py-1 text-sm bg-white dark:bg-gray-800 text-gray-900 dark:text-white resize-none"
+                        ></textarea>
+                      </div>
                       <div class="flex gap-2 mt-3">
                         <button
                           @click="saveEditItem"
@@ -531,6 +619,17 @@ const handleRemove = () => {
                     <div v-if="collectionItem.scanned_image_path" class="text-xs text-purple-500 mt-1">
                       Scanned card
                     </div>
+                    <!-- Notes preview -->
+                    <div v-if="collectionItem.notes" class="text-xs text-gray-500 dark:text-gray-400 mt-1 truncate max-w-xs" :title="collectionItem.notes">
+                      {{ collectionItem.notes }}
+                    </div>
+                    <!-- Language/Set mismatch warning -->
+                    <div v-if="getLanguageSetError(collectionItem)" class="text-xs text-orange-500 mt-1 flex items-center gap-1">
+                      <svg class="w-3 h-3 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                        <path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
+                      </svg>
+                      <span class="truncate">{{ getLanguageSetError(collectionItem) }}</span>
+                    </div>
                   </div>
                   <div class="flex gap-2 flex-shrink-0">
                     <button
@@ -538,6 +637,12 @@ const handleRemove = () => {
                       class="text-blue-600 dark:text-blue-400 hover:text-blue-800 text-sm"
                     >
                       Edit
+                    </button>
+                    <button
+                      @click="startReassign(collectionItem)"
+                      class="text-purple-600 dark:text-purple-400 hover:text-purple-800 text-sm"
+                    >
+                      Reassign
                     </button>
                     <button
                       @click="removeItem(collectionItem)"
@@ -603,5 +708,14 @@ const handleRemove = () => {
         </div>
       </div>
     </div>
+
+    <!-- Reassign Card Modal -->
+    <ReassignCardModal
+      v-if="reassigningItem"
+      :item="reassigningItem"
+      :current-card="card"
+      @reassign="handleReassign"
+      @close="reassigningItem = null"
+    />
   </div>
 </template>

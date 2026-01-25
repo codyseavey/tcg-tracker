@@ -220,6 +220,131 @@ func (h *CollectionHandler) UpdateCollectionItem(c *gin.Context) {
 		}
 	}
 
+	// Handle card reassignment if CardID is provided and different
+	if req.CardID != nil && *req.CardID != item.CardID {
+		newCardID := *req.CardID
+
+		// Validate that the new card exists
+		var newCard *models.Card
+		var dbCard models.Card
+		if err := db.First(&dbCard, "id = ?", newCardID).Error; err == nil {
+			newCard = &dbCard
+		} else {
+			// Try to find it via pokemon service (for Japanese cards loaded from JSON)
+			if card, err := h.pokemonService.GetCard(newCardID); err == nil && card != nil {
+				newCard = card
+			}
+		}
+
+		if newCard == nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "target card not found"})
+			return
+		}
+
+		// Get the current card to validate game match
+		var currentCard *models.Card
+		var currentDbCard models.Card
+		if err := db.First(&currentDbCard, "id = ?", item.CardID).Error; err == nil {
+			currentCard = &currentDbCard
+		} else if card, err := h.pokemonService.GetCard(item.CardID); err == nil && card != nil {
+			currentCard = card
+		}
+
+		// Prevent cross-game reassignment
+		if currentCard != nil && currentCard.Game != newCard.Game {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "cannot reassign to a different game"})
+			return
+		}
+
+		// Determine the final attributes for the reassigned item
+		// Use new values if provided, otherwise keep current
+		finalCondition := item.Condition
+		if req.Condition != nil {
+			finalCondition = *req.Condition
+		}
+		finalPrinting := item.Printing
+		if req.Printing != nil {
+			finalPrinting = *req.Printing
+		}
+		finalLanguage := item.Language
+		if req.Language != nil {
+			finalLanguage = models.NormalizeLanguage(string(*req.Language))
+		}
+
+		// Non-scanned items can merge into existing stacks with the new card_id
+		if item.ScannedImagePath == "" {
+			// Look for existing stack with new card_id + same attributes
+			var target models.CollectionItem
+			err := db.Where("card_id = ? AND condition = ? AND printing = ? AND language = ? AND (scanned_image_path IS NULL OR scanned_image_path = '') AND id != ?",
+				newCardID, finalCondition, finalPrinting, finalLanguage, item.ID).
+				First(&target).Error
+
+			if err == nil {
+				// Merge into existing stack using a transaction
+				tx := db.Begin()
+				target.Quantity += item.Quantity
+				if err := tx.Save(&target).Error; err != nil {
+					tx.Rollback()
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				}
+				// Delete the source item
+				if err := tx.Delete(&item).Error; err != nil {
+					tx.Rollback()
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				}
+				if err := tx.Commit().Error; err != nil {
+					c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+					return
+				}
+				db.Preload("Card").First(&target, target.ID)
+				// If the card isn't in the database, load it from pokemon service
+				if target.Card.Name == "" && target.Card.ImageURL == "" {
+					if card, err := h.pokemonService.GetCard(target.CardID); err == nil && card != nil {
+						target.Card = *card
+					}
+				}
+				c.JSON(http.StatusOK, models.CollectionUpdateResponse{
+					Item:      target,
+					Operation: "reassigned_merged",
+					Message:   fmt.Sprintf("Reassigned and merged into existing stack of %s", newCard.Name),
+				})
+				return
+			}
+		}
+
+		// No existing stack to merge into (or item is scanned), update in place
+		item.CardID = newCardID
+		item.Condition = finalCondition
+		item.Printing = finalPrinting
+		item.Language = finalLanguage
+		if req.Notes != nil {
+			item.Notes = *req.Notes
+		}
+		if req.Quantity != nil && item.ScannedImagePath == "" {
+			item.Quantity = *req.Quantity
+		}
+
+		if err := db.Save(&item).Error; err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+		db.Preload("Card").First(&item, item.ID)
+		// If the card isn't in the database, load it from pokemon service
+		if item.Card.Name == "" && item.Card.ImageURL == "" {
+			if card, err := h.pokemonService.GetCard(item.CardID); err == nil && card != nil {
+				item.Card = *card
+			}
+		}
+		c.JSON(http.StatusOK, models.CollectionUpdateResponse{
+			Item:      item,
+			Operation: "reassigned",
+			Message:   fmt.Sprintf("Reassigned to %s", newCard.Name),
+		})
+		return
+	}
+
 	// Check if condition, printing, or language is changing
 	// Note: normalize language before comparing since item.Language is already normalized
 	conditionChanging := req.Condition != nil && *req.Condition != item.Condition
