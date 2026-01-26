@@ -321,12 +321,25 @@ func (s *PokemonHybridService) loadData(dataDir string) error {
 
 	// Load Japanese card data if available
 	if _, err := os.Stat(japanDataPath); err == nil {
+		// Load Japanese set symbol mappings from Bulbapedia
+		japanSymbols := make(map[string]string)
+		japanSymbolsFile := filepath.Join(japanDataPath, "set_symbols.json")
+		if symbolsData, err := os.ReadFile(japanSymbolsFile); err == nil {
+			if err := json.Unmarshal(symbolsData, &japanSymbols); err != nil {
+				log.Printf("Warning: failed to parse Japanese set symbols: %v", err)
+			}
+		}
+
 		// Load Japanese sets
 		japanSetsFile := filepath.Join(japanDataPath, "sets.json")
 		if japanSetsData, err := os.ReadFile(japanSetsFile); err == nil {
 			var japanSets []LocalSet
 			if err := json.Unmarshal(japanSetsData, &japanSets); err == nil {
 				for _, set := range japanSets {
+					// Apply symbol URL from mapping if available
+					if symbolURL, ok := japanSymbols[set.Name]; ok {
+						set.Images.Symbol = symbolURL
+					}
 					s.sets[set.ID] = set
 				}
 			}
