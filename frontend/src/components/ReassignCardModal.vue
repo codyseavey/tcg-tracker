@@ -65,7 +65,7 @@ async function performGroupedSearch(query) {
     const result = await cardService.searchGrouped(query, game.value)
     setGroups.value = result.set_groups || []
     phase.value = setGroups.value.length > 0 ? 'set-list' : 'search'
-  } catch (err) {
+  } catch {
     searchError.value = 'Search failed'
     setGroups.value = []
     phase.value = 'search'
