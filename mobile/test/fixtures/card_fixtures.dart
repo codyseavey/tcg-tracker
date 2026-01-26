@@ -45,6 +45,20 @@ class CardFixtures {
     'price_usd': 0.0,
   };
 
+  /// Second Pokemon card in same set (for testing standard UI with multiple cards)
+  static const Map<String, dynamic> sameSetPokemonCardJson = {
+    'id': 'swsh4-026',
+    'game': 'pokemon',
+    'name': 'Pikachu VMAX',
+    'set_name': 'Vivid Voltage',
+    'set_code': 'swsh4',
+    'card_number': '026',
+    'rarity': 'Ultra Rare',
+    'image_url': 'https://images.pokemontcg.io/swsh4/026.png',
+    'price_usd': 45.00,
+    'price_foil_usd': 75.00,
+  };
+
   /// MTG card JSON
   static const Map<String, dynamic> mtgCardJson = {
     'id': 'neo-123',
@@ -79,6 +93,8 @@ class CardFixtures {
   static CardModel get nullOptionalsCard => CardModel.fromJson(nullOptionalsJson);
   static CardModel get zeroPriceCard => CardModel.fromJson(zeroPriceJson);
   static CardModel get mtgCard => CardModel.fromJson(mtgCardJson);
+  static CardModel get sameSetPokemonCard =>
+      CardModel.fromJson(sameSetPokemonCardJson);
 
   /// Card with only setCode (no setName)
   static CardModel get setCodeOnlyCard => CardModel(

@@ -24,7 +24,8 @@ class ScanFixtures {
     'cards': [CardFixtures.completeCardJson],
   };
 
-  /// Gemini result with multiple candidates (low confidence)
+  /// Gemini result with multiple candidates from the same set (low confidence)
+  /// Uses cards from the same set to test standard UI (not grouped 2-phase UI)
   static Map<String, dynamic> get multiCandidateGeminiResultJson => {
     'card_id': 'swsh4-025',
     'card_name': 'Charizard VMAX',
@@ -38,7 +39,10 @@ class ScanFixtures {
     'reasoning':
         'Multiple printings found, artwork similar but not exact match.',
     'turns_used': 5,
-    'cards': [CardFixtures.completeCardJson, CardFixtures.mtgCardJson],
+    'cards': [
+      CardFixtures.completeCardJson,
+      CardFixtures.sameSetPokemonCardJson,
+    ],
   };
 
   /// Gemini result for Japanese card
