@@ -385,6 +385,7 @@ Response includes `operation` field: `"updated"`, `"split"`, or `"merged"`
 **Add to Collection Logic:**
 - Cards with scanned images always create individual entries (qty=1)
 - Non-scanned cards merge into existing stacks with matching card_id+condition+printing+language
+- Cards not in the `cards` table are auto-cached from Pokemon/Scryfall services (handles Japanese cards loaded from JSON)
 
 ### Frontend Serving
 The Go backend can serve the Vue.js frontend from `FRONTEND_DIST_PATH`:

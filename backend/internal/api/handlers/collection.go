@@ -77,8 +77,25 @@ func (h *CollectionHandler) AddToCollection(c *gin.Context) {
 	// Verify card exists in cache or fetch it
 	var card models.Card
 	if err := db.First(&card, "id = ?", req.CardID).Error; err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "card not found, please search for it first"})
-		return
+		// Card not in database - try to load from pokemon service (handles Japanese cards from JSON)
+		if loadedCard, loadErr := h.pokemonService.GetCard(req.CardID); loadErr == nil && loadedCard != nil {
+			// Cache the card in the database so price worker can update it
+			if saveErr := db.Save(loadedCard).Error; saveErr != nil {
+				log.Printf("Warning: failed to cache card %s: %v", req.CardID, saveErr)
+			}
+			card = *loadedCard
+		} else {
+			// Also try scryfall for MTG cards
+			if loadedCard, loadErr := h.scryfallService.GetCard(req.CardID); loadErr == nil && loadedCard != nil {
+				if saveErr := db.Save(loadedCard).Error; saveErr != nil {
+					log.Printf("Warning: failed to cache card %s: %v", req.CardID, saveErr)
+				}
+				card = *loadedCard
+			} else {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "card not found, please search for it first"})
+				return
+			}
+		}
 	}
 
 	// Validate and set defaults

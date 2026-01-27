@@ -128,3 +128,4 @@ tcg_scanner.db
 
 # MCP config
 .mcp.json
+*.tsbuildinfo
