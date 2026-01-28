@@ -61,6 +61,13 @@ const themeIcon = () => {
               Collection
             </router-link>
             <router-link
+              to="/bulk-import"
+              class="text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white px-3 py-2 rounded-md"
+              active-class="text-blue-600 dark:text-blue-400 font-medium"
+            >
+              Bulk Import
+            </router-link>
+            <router-link
               to="/add"
               class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition"
             >
@@ -163,6 +170,13 @@ const themeIcon = () => {
             @click="mobileMenuOpen = false"
           >
             Collection
+          </router-link>
+          <router-link
+            to="/bulk-import"
+            class="block px-3 py-2 rounded-md text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-700"
+            @click="mobileMenuOpen = false"
+          >
+            Bulk Import
           </router-link>
           <router-link
             to="/add"

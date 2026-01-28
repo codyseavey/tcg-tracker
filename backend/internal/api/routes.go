@@ -16,7 +16,7 @@ import (
 	"github.com/codyseavey/tcg-tracker/backend/internal/services"
 )
 
-func SetupRouter(scryfallService *services.ScryfallService, pokemonService *services.PokemonHybridService, geminiService *services.GeminiService, priceWorker *services.PriceWorker, priceService *services.PriceService, imageStorageService *services.ImageStorageService, snapshotService *services.SnapshotService, tcgPlayerSync *services.TCGPlayerSyncService, justTCG *services.JustTCGService) *gin.Engine {
+func SetupRouter(scryfallService *services.ScryfallService, pokemonService *services.PokemonHybridService, geminiService *services.GeminiService, priceWorker *services.PriceWorker, priceService *services.PriceService, imageStorageService *services.ImageStorageService, snapshotService *services.SnapshotService, tcgPlayerSync *services.TCGPlayerSyncService, justTCG *services.JustTCGService, bulkImportWorker *services.BulkImportWorker) *gin.Engine {
 	router := gin.Default()
 
 	// Get frontend dist path from env
@@ -43,10 +43,16 @@ func SetupRouter(scryfallService *services.ScryfallService, pokemonService *serv
 	collectionHandler := handlers.NewCollectionHandler(scryfallService, pokemonService, imageStorageService, snapshotService, priceWorker)
 	priceHandler := handlers.NewPriceHandler(priceWorker, priceService)
 	adminHandler := handlers.NewAdminHandler(tcgPlayerSync, justTCG)
+	bulkImportHandler := handlers.NewBulkImportHandler(bulkImportWorker, pokemonService, scryfallService, imageStorageService)
 
 	// Serve scanned images
 	if imageStorageService != nil {
 		router.Static("/images/scanned", imageStorageService.GetStorageDir())
+	}
+
+	// Serve bulk import images
+	if bulkImportWorker != nil {
+		router.Static("/images/bulk-import", bulkImportWorker.GetImageStorageDir())
 	}
 
 	// Admin key auth middleware for protected routes
@@ -111,6 +117,19 @@ func SetupRouter(scryfallService *services.ScryfallService, pokemonService *serv
 			admin.POST("/sync-tcgplayer-ids/blocking", adminHandler.SyncTCGPlayerIDsBlocking)
 			admin.POST("/sync-tcgplayer-ids/set/:setName", adminHandler.SyncSetTCGPlayerIDs)
 			admin.GET("/sync-tcgplayer-ids/status", adminHandler.GetSyncStatus)
+		}
+
+		// Bulk import routes (protected)
+		bulkImport := api.Group("/bulk-import")
+		bulkImport.Use(adminAuth)
+		{
+			bulkImport.POST("/jobs", bulkImportHandler.CreateJob)
+			bulkImport.GET("/jobs", bulkImportHandler.GetCurrentJob)
+			bulkImport.GET("/jobs/:id", bulkImportHandler.GetJob)
+			bulkImport.PUT("/jobs/:id/items/:itemId", bulkImportHandler.UpdateItem)
+			bulkImport.POST("/jobs/:id/confirm", bulkImportHandler.ConfirmJob)
+			bulkImport.DELETE("/jobs/:id", bulkImportHandler.DeleteJob)
+			bulkImport.GET("/search", bulkImportHandler.SearchCards)
 		}
 	}
 

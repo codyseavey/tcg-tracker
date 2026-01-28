@@ -70,6 +70,9 @@ func main() {
 	// Initialize TCGPlayer sync service for bulk prepopulating TCGPlayerIDs
 	tcgPlayerSync := services.NewTCGPlayerSyncService(justTCGService)
 
+	// Initialize bulk import worker
+	bulkImportWorker := services.NewBulkImportWorker(database.GetDB(), geminiService, pokemonService, scryfallService)
+
 	// Create a cancellable context for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -98,6 +101,9 @@ func main() {
 	// Start snapshot service in background
 	go snapshotService.Start(ctx)
 
+	// Start bulk import worker in background
+	bulkImportWorker.Start()
+
 	// Optionally sync missing TCGPlayerIDs on startup (if enabled)
 	if os.Getenv("SYNC_TCGPLAYER_IDS_ON_STARTUP") == "true" {
 		go func() {
@@ -114,7 +120,7 @@ func main() {
 	}
 
 	// Setup router
-	router := api.SetupRouter(scryfallService, pokemonService, geminiService, priceWorker, priceService, imageStorageService, snapshotService, tcgPlayerSync, justTCGService)
+	router := api.SetupRouter(scryfallService, pokemonService, geminiService, priceWorker, priceService, imageStorageService, snapshotService, tcgPlayerSync, justTCGService, bulkImportWorker)
 
 	// Get port from environment
 	port := os.Getenv("PORT")
@@ -144,6 +150,9 @@ func main() {
 
 	// Cancel the context to stop the price worker
 	cancel()
+
+	// Stop the bulk import worker
+	bulkImportWorker.Stop()
 
 	// Give outstanding requests a deadline to complete
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)

@@ -263,4 +263,94 @@ export const authService = {
   }
 }
 
+export const bulkImportService = {
+  /**
+   * Create a new bulk import job with uploaded images
+   * @param {FileList|File[]} files - Array of image files to upload
+   * @param {Function} onProgress - Optional progress callback (current, total)
+   * @returns {Promise<Object>} - { job_id, total_items, status, errors }
+   */
+  async createJob(files, onProgress = null) {
+    const formData = new FormData()
+    for (const file of files) {
+      formData.append('images', file)
+    }
+
+    const response = await api.post('/bulk-import/jobs', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 300000, // 5 minute timeout for large uploads
+      onUploadProgress: (progressEvent) => {
+        if (onProgress && progressEvent.total) {
+          onProgress(progressEvent.loaded, progressEvent.total)
+        }
+      }
+    })
+    return response.data
+  },
+
+  /**
+   * Get the current/most recent bulk import job
+   * @returns {Promise<Object>} - Job with items or 404 if no job
+   */
+  async getCurrentJob() {
+    const response = await api.get('/bulk-import/jobs')
+    return response.data
+  },
+
+  /**
+   * Get a specific bulk import job by ID
+   * @param {string} jobId - Job ID
+   * @returns {Promise<Object>} - Full job with items
+   */
+  async getJob(jobId) {
+    const response = await api.get(`/bulk-import/jobs/${jobId}`)
+    return response.data
+  },
+
+  /**
+   * Update a bulk import item (change selected card, condition, etc.)
+   * @param {string} jobId - Job ID
+   * @param {number} itemId - Item ID
+   * @param {Object} updates - { card_id, condition, printing_type, language }
+   * @returns {Promise<Object>} - Updated item
+   */
+  async updateItem(jobId, itemId, updates) {
+    const response = await api.put(`/bulk-import/jobs/${jobId}/items/${itemId}`, updates)
+    return response.data
+  },
+
+  /**
+   * Confirm and add items to collection
+   * @param {string} jobId - Job ID
+   * @param {number[]} [itemIds] - Specific item IDs to confirm (empty = all identified items)
+   * @returns {Promise<Object>} - { added, skipped, errors }
+   */
+  async confirmJob(jobId, itemIds = null) {
+    const payload = itemIds ? { item_ids: itemIds } : {}
+    const response = await api.post(`/bulk-import/jobs/${jobId}/confirm`, payload)
+    return response.data
+  },
+
+  /**
+   * Delete a bulk import job and all its images
+   * @param {string} jobId - Job ID
+   */
+  async deleteJob(jobId) {
+    await api.delete(`/bulk-import/jobs/${jobId}`)
+  },
+
+  /**
+   * Search for cards (for manual selection when identification fails)
+   * @param {string} query - Search query
+   * @param {string} game - 'pokemon' or 'mtg'
+   * @returns {Promise<Object>} - { cards: [...] }
+   */
+  async searchCards(query, game = 'pokemon') {
+    const response = await api.get('/bulk-import/search', {
+      params: { q: query, game }
+    })
+    return response.data
+  }
+}
+
 export default api

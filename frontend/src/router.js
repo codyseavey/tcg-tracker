@@ -4,6 +4,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 const Dashboard = () => import('./views/Dashboard.vue')
 const Collection = () => import('./views/Collection.vue')
 const AddCard = () => import('./views/AddCard.vue')
+const BulkImport = () => import('./views/BulkImport.vue')
 const NotFound = () => import('./views/NotFound.vue')
 
 const routes = [
@@ -24,6 +25,12 @@ const routes = [
     name: 'AddCard',
     component: AddCard,
     meta: { title: 'Add Card' }
+  },
+  {
+    path: '/bulk-import',
+    name: 'BulkImport',
+    component: BulkImport,
+    meta: { title: 'Bulk Import' }
   },
   {
     path: '/:pathMatch(.*)*',

@@ -63,6 +63,8 @@ Environment variables (see `backend/.env.example`):
 - `ADMIN_KEY` - Admin key for collection modification (optional, disables auth if not set)
 - `SYNC_TCGPLAYER_IDS_ON_STARTUP` - Set to "true" to auto-sync TCGPlayerIDs on startup
 - `GOOGLE_API_KEY` - Gemini API key for card identification (**required** for scanning)
+- `BULK_IMPORT_CONCURRENCY` - Number of concurrent Gemini calls for bulk import (default: 10)
+- `BULK_IMPORT_IMAGES_DIR` - Directory for bulk import images (default: `./data/bulk_import_images`)
 
 ### Frontend
 ```bash
@@ -98,6 +100,7 @@ flutter build apk           # Build Android APK
 | `SnapshotService` | `internal/services/snapshot_service.go` | Daily collection value snapshots for historical tracking |
 | `ImageStorageService` | `internal/services/image_storage.go` | Store and retrieve scanned card images |
 | `TCGPlayerSyncService` | `internal/services/tcgplayer_sync.go` | Bulk sync TCGPlayerIDs from JustTCG for Pokemon cards |
+| `BulkImportWorker` | `internal/services/bulk_import_worker.go` | Background worker for bulk card image identification |
 
 ## API Endpoints
 
@@ -133,6 +136,15 @@ Base URL: `http://localhost:8080/api`
 - `POST /admin/sync-tcgplayer-ids/blocking` - Sync TCGPlayerIDs and wait for completion
 - `POST /admin/sync-tcgplayer-ids/set/:setName` - Sync TCGPlayerIDs for a specific set
 - `GET /admin/sync-tcgplayer-ids/status` - Check sync status and quota
+
+### Bulk Import (requires admin key)
+- `POST /bulk-import/jobs` - Upload images and create a bulk import job (multipart, max 200 files)
+- `GET /bulk-import/jobs` - Get current/most recent job
+- `GET /bulk-import/jobs/:id` - Get job with all items
+- `PUT /bulk-import/jobs/:id/items/:itemId` - Update item (select different card, change condition)
+- `POST /bulk-import/jobs/:id/confirm` - Add confirmed items to collection
+- `DELETE /bulk-import/jobs/:id` - Cancel and delete job
+- `GET /bulk-import/search` - Search cards for manual selection
 
 ### Health & Monitoring
 - `GET /health` - Health check
@@ -419,6 +431,8 @@ SQLite database with GORM models in `internal/models/`:
   - `ItemValue` (computed, not persisted) - Condition-specific value calculated by backend
   - `PriceLanguage` (computed) - Which language's price was used (may differ if fallback)
   - `PriceFallback` (computed) - True if price is from a different language than the card's language
+- `BulkImportJob` - Bulk import session with status, progress, and items
+- `BulkImportItem` - Individual image in a bulk import job with identification results
 
 ### Printing Types
 Cards support multiple printing variants via the `PrintingType` enum:

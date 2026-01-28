@@ -103,6 +103,9 @@ identifier/setid/
 # Scanned card images (user-generated)
 backend/data/scanned_images/
 
+# Bulk import images (temporary, cleaned up after 24h)
+backend/data/bulk_import_images/
+
 # Data files (generated/downloaded)
 *.faiss
 *.pkl

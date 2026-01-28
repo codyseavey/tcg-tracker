@@ -33,6 +33,7 @@ A trading card collection tracker for Magic: The Gathering and Pokemon cards wit
 ## Features
 
 - **Gemini AI Card Identification**: Upload card images for automatic identification using Gemini Vision with 12+ specialized tools (search, lookup, image comparison, set info)
+- **Bulk Import**: Upload up to 200 card images at once via the web UI, with background Gemini processing (10 concurrent), review/edit results, then batch-add to collection
 - **Multi-Language Support**: Automatically detects card language (Japanese, German, French, Italian) with language-specific pricing
 - **Card Search**: Search for MTG and Pokemon cards using external APIs
 - **MTG 2-Phase Selection**: When scanning MTG cards, browse all printings grouped by set and select the exact variant (foil, showcase, borderless, etc.)
@@ -106,6 +107,8 @@ Environment variables:
 - `JUSTTCG_API_KEY` - JustTCG API key for condition-based pricing
 - `JUSTTCG_DAILY_LIMIT` - Daily API request limit (default: 1000)
 - `SYNC_TCGPLAYER_IDS_ON_STARTUP` - Set to "true" to sync missing Pokemon TCGPlayerIDs on startup
+- `BULK_IMPORT_CONCURRENCY` - Number of concurrent Gemini calls for bulk import (default: 10)
+- `BULK_IMPORT_IMAGES_DIR` - Directory for bulk import images (default: ./data/bulk_import_images)
 
 #### 2. Frontend (Vue.js Web App)
 
@@ -160,6 +163,15 @@ Configure the server URL in settings to point to your backend IP.
 - `POST /api/admin/sync-tcgplayer-ids/blocking` - Sync TCGPlayerIDs and wait for completion
 - `POST /api/admin/sync-tcgplayer-ids/set/:setName` - Sync TCGPlayerIDs for a specific set
 - `GET /api/admin/sync-tcgplayer-ids/status` - Check sync status and quota
+
+### Bulk Import (🔒)
+- `POST /api/bulk-import/jobs` - Upload images and create bulk import job (multipart, max 200)
+- `GET /api/bulk-import/jobs` - Get current/most recent job
+- `GET /api/bulk-import/jobs/:id` - Get job with all items
+- `PUT /api/bulk-import/jobs/:id/items/:itemId` - Update item (select card, change condition)
+- `POST /api/bulk-import/jobs/:id/confirm` - Add confirmed items to collection
+- `DELETE /api/bulk-import/jobs/:id` - Cancel and delete job
+- `GET /api/bulk-import/search` - Search cards for manual selection
 
 *🔒 = Requires admin key if `ADMIN_KEY` is set*
 
