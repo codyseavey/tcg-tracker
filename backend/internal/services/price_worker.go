@@ -310,6 +310,12 @@ func (w *PriceWorker) batchUpdatePrices(cards []models.Card) (int, error) {
 				card := &cards[idx]
 				tcgPlayerID := ""
 
+				// Check for card-level override first (for cards in different sets on TCGPlayer)
+				if override, ok := cardTCGPlayerIDOverrides[card.ID]; ok {
+					tcgPlayerID = override
+					log.Printf("Price worker: using override for %s -> TCGPlayerID %s", card.ID, tcgPlayerID)
+				}
+
 				// Try matching by card number first
 				if card.CardNumber != "" {
 					normalizedNum := strings.TrimLeft(card.CardNumber, "0")

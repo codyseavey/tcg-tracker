@@ -11,6 +11,15 @@ import (
 	"github.com/codyseavey/tcg-tracker/backend/internal/models"
 )
 
+// cardTCGPlayerIDOverrides maps specific card IDs to their TCGPlayerID
+// Used for cards that are in different sets on TCGPlayer vs Pokemon TCG data
+// TCGPlayerID can be found from the product URL: tcgplayer.com/product/{TCGPlayerID}/...
+var cardTCGPlayerIDOverrides = map[string]string{
+	// Base Set Machamp #8 - only exists as 1st Edition, TCGPlayer lists it under "Deck Exclusives"
+	// https://www.tcgplayer.com/product/42425/pokemon-deck-exclusives-machamp-8-102
+	"base1-8": "42425",
+}
+
 // normalizeNameForPriceMatch converts special characters to ASCII for JustTCG matching
 // JustTCG uses ASCII names while Pokemon TCG data uses Unicode
 func normalizeNameForPriceMatch(name string) string {
@@ -167,6 +176,12 @@ func (s *TCGPlayerSyncService) SyncMissingTCGPlayerIDs(ctx context.Context) (*Sy
 			card := &cards[i]
 			tcgPlayerID := ""
 
+			// Check for card-level override first (for cards in different sets on TCGPlayer)
+			if override, ok := cardTCGPlayerIDOverrides[card.ID]; ok {
+				tcgPlayerID = override
+				log.Printf("TCGPlayerSync: using override for %s -> TCGPlayerID %s", card.ID, tcgPlayerID)
+			}
+
 			// Try matching by card number first
 			if card.CardNumber != "" {
 				// Normalize card number (remove leading zeros)
@@ -204,26 +219,6 @@ func (s *TCGPlayerSyncService) SyncMissingTCGPlayerIDs(ctx context.Context) (*Sy
 				normalizedName := normalizeNameForPriceMatch(card.Name)
 				log.Printf("TCGPlayerSync: no match for %q #%s in set %s (normalized name: %q)",
 					card.Name, card.CardNumber, justTCGSetID, normalizedName)
-				// Extra debug for Machamp
-				if strings.Contains(strings.ToLower(card.Name), "machamp") {
-					log.Printf("TCGPlayerSync debug: Machamp lookup failed. CardsByNum has %d entries, CardsByName has %d entries",
-						len(setData.CardsByNum), len(setData.CardsByName))
-					log.Printf("TCGPlayerSync debug: Looking for num=%q or normalizedNum=%q, name=%q",
-						card.CardNumber, strings.TrimLeft(card.CardNumber, "0"), normalizedName)
-					// Check if there's anything with "8" in the keys
-					for k, v := range setData.CardsByNum {
-						if k == "8" || k == "08" || k == "8/102" {
-							log.Printf("TCGPlayerSync debug: Found key %q -> %s", k, v)
-						}
-					}
-					for k, v := range setData.CardsByName {
-						if strings.Contains(k, "machamp") {
-							log.Printf("TCGPlayerSync debug: Found name key %q -> %s", k, v)
-						}
-					}
-					// Search JustTCG for Machamp to see where it's listed
-					s.justTCG.DebugSearchCard("Machamp")
-				}
 				result.CardsSkipped++
 			}
 		}
