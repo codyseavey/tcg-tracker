@@ -20,11 +20,18 @@ import (
 )
 
 const (
+	// Standard mode: optimized for speed (real-time scanning)
 	geminiModel          = "gemini-2.0-flash"
 	geminiAPIURL         = "https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent"
 	geminiTimeout        = 90 * time.Second // Longer timeout for multi-turn identification
 	imageDownloadTimeout = 10 * time.Second
 	maxTurns             = 15 // Max conversation turns before giving up
+
+	// Thorough mode: optimized for accuracy (background bulk import)
+	geminiModelThorough   = "gemini-3.0-flash" // Gemini 3 Flash for better accuracy
+	geminiTimeoutThorough = 180 * time.Second  // 3 minutes for thorough analysis
+	maxTurnsThorough      = 25                 // More turns for difficult cards
+	minConfidenceThorough = 0.8                // Retry if confidence below this
 )
 
 // GeminiService handles card identification via Gemini Vision API with function calling
@@ -130,6 +137,13 @@ type IdentificationResult struct {
 	TurnsUsed       int             `json:"turns_used"`                  // Number of API turns used
 	Candidates      []CandidateCard `json:"candidates,omitempty"`        // Alternative candidates if low confidence
 	SearchTerms     []string        `json:"search_terms,omitempty"`      // Card names Gemini searched for (fallback for handler)
+}
+
+// IdentifyOptions configures the identification behavior
+type IdentifyOptions struct {
+	// Thorough mode: use more capable model, more turns, auto-retry on low confidence
+	// Recommended for background processing (bulk import) where accuracy > speed
+	Thorough bool
 }
 
 // CardSearcher is the interface for searching cards (implemented by Pokemon/Scryfall services)
@@ -256,22 +270,155 @@ func detectMimeType(data []byte) string {
 	return contentType
 }
 
-// IdentifyCard uses Gemini with function calling to identify a card from an image
+// IdentifyCard uses Gemini with function calling to identify a card from an image.
+// This is the standard method optimized for speed (real-time scanning).
 func (s *GeminiService) IdentifyCard(
 	ctx context.Context,
 	imageBytes []byte,
 	pokemonSearcher CardSearcher,
 	mtgSearcher CardSearcher,
 ) (*IdentificationResult, error) {
+	return s.IdentifyCardWithOptions(ctx, imageBytes, pokemonSearcher, mtgSearcher, IdentifyOptions{})
+}
+
+// IdentifyCardWithOptions uses Gemini with function calling to identify a card from an image.
+// Options allow configuring the identification behavior (e.g., thorough mode for bulk import).
+func (s *GeminiService) IdentifyCardWithOptions(
+	ctx context.Context,
+	imageBytes []byte,
+	pokemonSearcher CardSearcher,
+	mtgSearcher CardSearcher,
+	opts IdentifyOptions,
+) (*IdentificationResult, error) {
 	if !s.enabled {
 		return nil, fmt.Errorf("Gemini service not enabled (no GOOGLE_API_KEY)")
 	}
 
+	// Configure based on mode
+	model := geminiModel
+	timeout := geminiTimeout
+	maxIterations := maxTurns
+	if opts.Thorough {
+		model = geminiModelThorough
+		timeout = geminiTimeoutThorough
+		maxIterations = maxTurnsThorough
+		log.Printf("Gemini thorough mode: using model=%s, timeout=%v, maxTurns=%d", model, timeout, maxIterations)
+	}
+
+	// Create context with appropriate timeout
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	// Run identification (may retry in thorough mode)
+	result, viewCardImageCalled, searchTerms, err := s.runIdentification(ctx, imageBytes, pokemonSearcher, mtgSearcher, model, maxIterations)
+	if err != nil {
+		return nil, err
+	}
+
+	// In thorough mode, retry if confidence is low or artwork wasn't verified
+	if opts.Thorough && result != nil {
+		needsRetry := false
+		retryReason := ""
+
+		if result.CardID != "" && !viewCardImageCalled {
+			needsRetry = true
+			retryReason = "artwork not verified (view_card_image not called)"
+		} else if result.CardID != "" && result.Confidence < minConfidenceThorough {
+			needsRetry = true
+			retryReason = fmt.Sprintf("low confidence (%.2f < %.2f)", result.Confidence, minConfidenceThorough)
+		} else if result.CardID == "" && len(searchTerms) > 0 {
+			needsRetry = true
+			retryReason = "no match found but search terms available"
+		}
+
+		if needsRetry {
+			log.Printf("Gemini thorough mode: retrying because %s", retryReason)
+
+			// Build a more specific prompt for retry
+			retryPrompt := buildRetryPrompt(result, viewCardImageCalled, searchTerms)
+			result2, _, searchTerms2, err := s.runIdentificationWithPrompt(ctx, imageBytes, pokemonSearcher, mtgSearcher, model, maxIterations, retryPrompt)
+			if err != nil {
+				log.Printf("Gemini thorough mode: retry failed: %v", err)
+				// Return original result on retry failure
+			} else if result2 != nil && (result2.CardID != "" || result.CardID == "") {
+				// Use retry result if it found something (or original also found nothing)
+				if result2.Confidence > result.Confidence || (result2.CardID != "" && result.CardID == "") {
+					log.Printf("Gemini thorough mode: retry improved result (confidence: %.2f -> %.2f)", result.Confidence, result2.Confidence)
+					result = result2
+					result.SearchTerms = append(searchTerms, searchTerms2...)
+				}
+			}
+		}
+	}
+
+	if result != nil {
+		result.SearchTerms = searchTerms
+	}
+
+	return result, nil
+}
+
+// buildRetryPrompt creates a more specific prompt for retry attempts
+func buildRetryPrompt(prevResult *IdentificationResult, viewCalled bool, searchTerms []string) string {
+	var hints []string
+
+	if prevResult.CardID != "" && !viewCalled {
+		hints = append(hints, "IMPORTANT: You MUST call view_card_image to verify the artwork matches before returning a result.")
+	}
+
+	if prevResult.CardID != "" && prevResult.Confidence < minConfidenceThorough {
+		hints = append(hints, fmt.Sprintf("Previous attempt had low confidence (%.2f). Please be more thorough:", prevResult.Confidence))
+		hints = append(hints, "- Compare multiple candidate images if available")
+		hints = append(hints, "- Check additional details like HP, attacks, set symbol")
+		hints = append(hints, "- Use get_card_details to verify card text matches")
+	}
+
+	if prevResult.CardID == "" && len(searchTerms) > 0 {
+		hints = append(hints, "Previous searches didn't find a match. Try:")
+		hints = append(hints, "- Alternative spellings or translations of the card name")
+		hints = append(hints, "- Searching by set if you can identify the set symbol")
+		hints = append(hints, "- Using list_pokemon_sets or list_mtg_sets to find the set code")
+	}
+
+	if len(hints) == 0 {
+		return ""
+	}
+
+	return "\n\n=== RETRY GUIDANCE ===\n" + strings.Join(hints, "\n")
+}
+
+// runIdentification performs the core identification loop
+func (s *GeminiService) runIdentification(
+	ctx context.Context,
+	imageBytes []byte,
+	pokemonSearcher CardSearcher,
+	mtgSearcher CardSearcher,
+	model string,
+	maxIterations int,
+) (*IdentificationResult, bool, []string, error) {
+	return s.runIdentificationWithPrompt(ctx, imageBytes, pokemonSearcher, mtgSearcher, model, maxIterations, "")
+}
+
+// runIdentificationWithPrompt performs identification with an optional additional prompt
+func (s *GeminiService) runIdentificationWithPrompt(
+	ctx context.Context,
+	imageBytes []byte,
+	pokemonSearcher CardSearcher,
+	mtgSearcher CardSearcher,
+	model string,
+	maxIterations int,
+	additionalPrompt string,
+) (*IdentificationResult, bool, []string, error) {
 	startTime := time.Now()
 
 	// Build initial message with the card image
 	imageB64 := base64.StdEncoding.EncodeToString(imageBytes)
 	mimeType := detectMimeType(imageBytes)
+
+	promptText := systemPrompt
+	if additionalPrompt != "" {
+		promptText += additionalPrompt
+	}
 
 	// Conversation history
 	contents := []geminiContent{
@@ -279,7 +426,7 @@ func (s *GeminiService) IdentifyCard(
 			Role: "user",
 			Parts: []geminiPart{
 				{InlineData: &geminiInlineData{MimeType: mimeType, Data: imageB64}},
-				{Text: systemPrompt},
+				{Text: promptText},
 			},
 		},
 	}
@@ -291,13 +438,13 @@ func (s *GeminiService) IdentifyCard(
 	searchTermsSeen := make(map[string]bool)
 
 	// Conversation loop - Gemini calls tools until it has an answer
-	for turn := 0; turn < maxTurns; turn++ {
+	for turn := 0; turn < maxIterations; turn++ {
 		turnsUsed++
 
-		// Call Gemini
-		resp, err := s.callGeminiWithTools(ctx, contents)
+		// Call Gemini with specified model
+		resp, err := s.callGeminiWithToolsAndModel(ctx, contents, model)
 		if err != nil {
-			return nil, fmt.Errorf("turn %d failed: %w", turn+1, err)
+			return nil, viewCardImageCalled, searchTerms, fmt.Errorf("turn %d failed: %w", turn+1, err)
 		}
 
 		// Check if Gemini wants to call functions
@@ -426,7 +573,7 @@ func (s *GeminiService) IdentifyCard(
 			Reasoning:   "Failed to identify card after max turns",
 			TurnsUsed:   turnsUsed,
 			SearchTerms: searchTerms,
-		}, nil
+		}, viewCardImageCalled, searchTerms, nil
 	}
 
 	// Add search terms to successful result too (for fallback candidates)
@@ -436,7 +583,7 @@ func (s *GeminiService) IdentifyCard(
 	log.Printf("Gemini identification complete: card_id=%q, canonical_name=%q, view_card_image_called=%v, turns=%d",
 		result.CardID, result.CanonicalNameEN, viewCardImageCalled, turnsUsed)
 
-	return result, nil
+	return result, viewCardImageCalled, searchTerms, nil
 }
 
 // cardImage holds an image for injection into the conversation
@@ -947,8 +1094,13 @@ func (s *GeminiService) parseIdentificationResult(text string) (*IdentificationR
 	return &result, nil
 }
 
-// callGeminiWithTools makes a request to Gemini with function calling enabled
+// callGeminiWithTools makes a request to Gemini with function calling enabled (uses default model)
 func (s *GeminiService) callGeminiWithTools(ctx context.Context, contents []geminiContent) (*geminiModelResponse, error) {
+	return s.callGeminiWithToolsAndModel(ctx, contents, geminiModel)
+}
+
+// callGeminiWithToolsAndModel makes a request to Gemini with function calling enabled using the specified model
+func (s *GeminiService) callGeminiWithToolsAndModel(ctx context.Context, contents []geminiContent, model string) (*geminiModelResponse, error) {
 	req := geminiRequestWithTools{
 		Contents: contents,
 		Tools:    []geminiTool{{FunctionDeclarations: toolDeclarations}},
@@ -963,7 +1115,7 @@ func (s *GeminiService) callGeminiWithTools(ctx context.Context, contents []gemi
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	url := fmt.Sprintf(geminiAPIURL, geminiModel) + "?key=" + s.apiKey
+	url := fmt.Sprintf(geminiAPIURL, model) + "?key=" + s.apiKey
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(reqJSON))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)

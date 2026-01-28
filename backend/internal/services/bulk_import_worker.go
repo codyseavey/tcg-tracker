@@ -224,8 +224,9 @@ func (w *BulkImportWorker) processItem(item *models.BulkImportItem) {
 		return
 	}
 
-	// Identify the card using Gemini
-	result, err := w.geminiService.IdentifyCard(ctx, imageData, w.pokemonService, w.scryfallService)
+	// Identify the card using Gemini with thorough mode for better accuracy
+	// (bulk import runs in the background, so accuracy > speed)
+	result, err := w.geminiService.IdentifyCardWithOptions(ctx, imageData, w.pokemonService, w.scryfallService, IdentifyOptions{Thorough: true})
 	if err != nil {
 		errorCode := categorizeGeminiError(err, "")
 		w.markItemFailed(item, errorCode, err.Error())
