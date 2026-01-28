@@ -1094,11 +1094,6 @@ func (s *GeminiService) parseIdentificationResult(text string) (*IdentificationR
 	return &result, nil
 }
 
-// callGeminiWithTools makes a request to Gemini with function calling enabled (uses default model)
-func (s *GeminiService) callGeminiWithTools(ctx context.Context, contents []geminiContent) (*geminiModelResponse, error) {
-	return s.callGeminiWithToolsAndModel(ctx, contents, geminiModel)
-}
-
 // callGeminiWithToolsAndModel makes a request to Gemini with function calling enabled using the specified model
 func (s *GeminiService) callGeminiWithToolsAndModel(ctx context.Context, contents []geminiContent, model string) (*geminiModelResponse, error) {
 	req := geminiRequestWithTools{
