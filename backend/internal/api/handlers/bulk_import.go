@@ -572,7 +572,7 @@ func (h *BulkImportHandler) DeleteJob(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "job deleted"})
 }
 
-// SearchCards searches for cards (for manual selection when identification fails)
+// SearchCards searches for cards grouped by set (for manual selection when identification fails)
 // GET /api/bulk-import/search?q=<query>&game=<pokemon|mtg>
 func (h *BulkImportHandler) SearchCards(c *gin.Context) {
 	query := c.Query("q")
@@ -583,23 +583,14 @@ func (h *BulkImportHandler) SearchCards(c *gin.Context) {
 		return
 	}
 
-	var cards []models.Card
+	var result *models.GroupedSearchResult
 	var err error
 
+	// Use grouped search to show all printings organized by set
 	if game == "mtg" {
-		result, searchErr := h.scryfallService.SearchCards(query)
-		if searchErr != nil {
-			err = searchErr
-		} else {
-			cards = result.Cards
-		}
+		result, err = h.scryfallService.SearchCardsGrouped(c.Request.Context(), query, services.SortByReleaseDesc)
 	} else {
-		result, searchErr := h.pokemonService.SearchCards(query)
-		if searchErr != nil {
-			err = searchErr
-		} else {
-			cards = result.Cards
-		}
+		result, err = h.pokemonService.SearchCardsGrouped(query, services.SortByReleaseDesc)
 	}
 
 	if err != nil {
@@ -607,12 +598,7 @@ func (h *BulkImportHandler) SearchCards(c *gin.Context) {
 		return
 	}
 
-	// Limit to 20 results
-	if len(cards) > 20 {
-		cards = cards[:20]
-	}
-
-	c.JSON(http.StatusOK, gin.H{"cards": cards})
+	c.JSON(http.StatusOK, result)
 }
 
 // Helper functions

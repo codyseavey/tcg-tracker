@@ -55,8 +55,9 @@ export const useBulkImportStore = defineStore('bulkImport', {
       // Polling
       pollInterval: null,
       
-      // Search for manual card selection
-      searchResults: [],
+      // Search for manual card selection (grouped by set)
+      searchResults: [], // Array of set groups: { set_code, set_name, cards: [...] }
+      searchTotalCards: 0,
       searchLoading: false
     }
   },
@@ -345,11 +346,13 @@ export const useBulkImportStore = defineStore('bulkImport', {
       this.searchLoading = true
       try {
         const result = await bulkImportService.searchCards(query, game)
-        this.searchResults = result.cards || []
+        // Results are now grouped by set: { set_groups: [...], total_cards: N }
+        this.searchResults = result.set_groups || []
+        this.searchTotalCards = result.total_cards || 0
         return result
       } catch (err) {
         this.error = err.message
-        return { cards: [] }
+        return { set_groups: [], total_cards: 0 }
       } finally {
         this.searchLoading = false
       }
@@ -360,6 +363,7 @@ export const useBulkImportStore = defineStore('bulkImport', {
      */
     clearSearch() {
       this.searchResults = []
+      this.searchTotalCards = 0
     }
   }
 })

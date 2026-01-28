@@ -613,25 +613,42 @@ function getBulkImportImageUrl(imagePath) {
             </div>
           </div>
           
-          <!-- Search results -->
-          <div class="p-4 max-h-64 overflow-y-auto">
+          <!-- Search results (grouped by set) -->
+          <div class="p-4 max-h-96 overflow-y-auto">
             <div v-if="store.searchLoading" class="text-center py-4 text-gray-500">
               Searching...
             </div>
             <div v-else-if="store.searchResults.length === 0" class="text-center py-4 text-gray-500">
               {{ searchQuery ? 'No results found' : 'Enter a search term' }}
             </div>
-            <div v-else class="grid grid-cols-4 gap-2">
-              <button
-                v-for="card in store.searchResults"
-                :key="card.id"
-                @click="selectSearchResult(card)"
-                class="p-2 border dark:border-gray-600 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left"
+            <div v-else class="space-y-3">
+              <div class="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                {{ store.searchTotalCards }} cards across {{ store.searchResults.length }} sets
+              </div>
+              <!-- Set groups -->
+              <details 
+                v-for="setGroup in store.searchResults" 
+                :key="setGroup.set_code"
+                class="border dark:border-gray-600 rounded-lg overflow-hidden"
+                :open="store.searchResults.length === 1"
               >
-                <img v-if="card.image_url" :src="card.image_url" :alt="card.name" class="w-full h-24 object-contain mb-1" />
-                <div class="text-xs font-medium text-gray-900 dark:text-white truncate">{{ card.name }}</div>
-                <div class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ card.set_name }}</div>
-              </button>
+                <summary class="px-3 py-2 bg-gray-50 dark:bg-gray-700 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 flex items-center justify-between">
+                  <span class="font-medium text-gray-900 dark:text-white">{{ setGroup.set_name }}</span>
+                  <span class="text-sm text-gray-500 dark:text-gray-400">{{ setGroup.cards.length }} cards</span>
+                </summary>
+                <div class="p-2 grid grid-cols-4 gap-2">
+                  <button
+                    v-for="card in setGroup.cards"
+                    :key="card.id"
+                    @click="selectSearchResult(card)"
+                    class="p-2 border dark:border-gray-600 rounded hover:bg-blue-50 dark:hover:bg-blue-900/20 text-left"
+                  >
+                    <img v-if="card.image_url" :src="card.image_url" :alt="card.name" class="w-full h-24 object-contain mb-1" />
+                    <div class="text-xs font-medium text-gray-900 dark:text-white truncate">{{ card.name }}</div>
+                    <div class="text-xs text-gray-500 dark:text-gray-400 truncate">#{{ card.card_number }}</div>
+                  </button>
+                </div>
+              </details>
             </div>
           </div>
         </div>
