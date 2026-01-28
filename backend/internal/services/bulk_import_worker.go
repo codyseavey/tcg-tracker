@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -213,26 +214,32 @@ func (w *BulkImportWorker) processItem(item *models.BulkImportItem) {
 	imagePath := filepath.Join(w.imageStorageDir, item.ImagePath)
 	imageData, err := os.ReadFile(imagePath)
 	if err != nil {
-		w.markItemFailed(item, fmt.Sprintf("failed to read image: %v", err))
+		w.markItemFailed(item, models.ErrorCodeFileError, fmt.Sprintf("Failed to read image file: %v", err))
 		return
 	}
 
 	// Check if Gemini is available
 	if !w.geminiService.IsEnabled() {
-		w.markItemFailed(item, "Gemini service not available")
+		w.markItemFailed(item, models.ErrorCodeServiceUnavailable, "Card identification service is not configured. Please set GOOGLE_API_KEY.")
 		return
 	}
 
 	// Identify the card using Gemini
 	result, err := w.geminiService.IdentifyCard(ctx, imageData, w.pokemonService, w.scryfallService)
 	if err != nil {
-		w.markItemFailed(item, fmt.Sprintf("identification failed: %v", err))
+		errorCode := categorizeGeminiError(err, "")
+		w.markItemFailed(item, errorCode, err.Error())
 		return
 	}
 
 	// Check if we got a result
 	if result.CardID == "" {
-		w.markItemFailed(item, "could not identify card")
+		// Use reasoning from Gemini if available, otherwise generic message
+		errMsg := "Could not identify the card in this image"
+		if result.Reasoning != "" {
+			errMsg = result.Reasoning
+		}
+		w.markItemFailed(item, models.ErrorCodeNoMatch, errMsg)
 		return
 	}
 
@@ -296,11 +303,12 @@ func (w *BulkImportWorker) processItem(item *models.BulkImportItem) {
 		UpdateColumn("processed_items", gorm.Expr("processed_items + 1"))
 }
 
-// markItemFailed marks an item as failed with an error message
-func (w *BulkImportWorker) markItemFailed(item *models.BulkImportItem, errorMsg string) {
-	log.Printf("Bulk import item %d failed: %s", item.ID, errorMsg)
+// markItemFailed marks an item as failed with a categorized error code and message
+func (w *BulkImportWorker) markItemFailed(item *models.BulkImportItem, errorCode models.BulkImportErrorCode, errorMsg string) {
+	log.Printf("Bulk import item %d failed [%s]: %s", item.ID, errorCode, errorMsg)
 	w.db.Model(item).Updates(map[string]interface{}{
 		"status":        models.BulkImportItemFailed,
+		"error_code":    errorCode,
 		"error_message": errorMsg,
 		"updated_at":    time.Now(),
 	})
@@ -308,6 +316,45 @@ func (w *BulkImportWorker) markItemFailed(item *models.BulkImportItem, errorMsg 
 	// Update job progress
 	w.db.Model(&models.BulkImportJob{}).Where("id = ?", item.JobID).
 		UpdateColumn("processed_items", gorm.Expr("processed_items + 1"))
+}
+
+// categorizeGeminiError analyzes an error message and returns the appropriate error code.
+// This helps the frontend display user-friendly messages and suggestions.
+func categorizeGeminiError(err error, errMsg string) models.BulkImportErrorCode {
+	if err == nil && errMsg == "" {
+		return models.ErrorCodeNone
+	}
+
+	msg := errMsg
+	if err != nil {
+		msg = err.Error()
+	}
+
+	// Check for timeout errors
+	if strings.Contains(msg, "context deadline exceeded") ||
+		strings.Contains(msg, "timeout") ||
+		strings.Contains(msg, "Timeout") {
+		return models.ErrorCodeTimeout
+	}
+
+	// Check for API errors (rate limit, network, auth)
+	if strings.Contains(msg, "API returned status") ||
+		strings.Contains(msg, "request failed") ||
+		strings.Contains(msg, "429") ||
+		strings.Contains(msg, "rate limit") ||
+		strings.Contains(msg, "quota") {
+		return models.ErrorCodeAPIError
+	}
+
+	// Check for "no match" scenarios
+	if strings.Contains(msg, "could not identify") ||
+		strings.Contains(msg, "no result") ||
+		strings.Contains(msg, "Failed to identify") {
+		return models.ErrorCodeNoMatch
+	}
+
+	// Default to no_match for unknown identification failures
+	return models.ErrorCodeNoMatch
 }
 
 // checkJobCompletion checks if all items are processed and updates job status

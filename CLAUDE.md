@@ -433,6 +433,18 @@ SQLite database with GORM models in `internal/models/`:
   - `PriceFallback` (computed) - True if price is from a different language than the card's language
 - `BulkImportJob` - Bulk import session with status, progress, and items
 - `BulkImportItem` - Individual image in a bulk import job with identification results
+  - `ErrorCode` - Categorized error code for user-friendly display (see below)
+  - `ErrorMessage` - Detailed error message for debugging
+
+### Bulk Import Error Codes
+When identification fails, `BulkImportItem.ErrorCode` is set to one of:
+- `no_card_visible` - Image doesn't contain a recognizable card
+- `image_quality` - Image too blurry, dark, or low resolution
+- `no_match` - Card detected but couldn't be matched to database
+- `api_error` - Gemini API unavailable (rate limit, network error)
+- `timeout` - Identification took too long
+- `file_error` - Failed to read image file
+- `service_unavailable` - Gemini service not configured
 
 ### Printing Types
 Cards support multiple printing variants via the `PrintingType` enum:

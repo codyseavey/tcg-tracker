@@ -26,6 +26,36 @@ const (
 	BulkImportItemConfirmed  BulkImportItemStatus = "confirmed" // Successfully added to collection
 )
 
+// BulkImportErrorCode categorizes why identification failed.
+// These codes help the frontend display user-friendly messages and suggestions.
+type BulkImportErrorCode string
+
+const (
+	// ErrorCodeNone - No error (identification succeeded)
+	ErrorCodeNone BulkImportErrorCode = ""
+
+	// ErrorCodeNoCardVisible - Image doesn't appear to contain a recognizable card
+	ErrorCodeNoCardVisible BulkImportErrorCode = "no_card_visible"
+
+	// ErrorCodeImageQuality - Image too blurry, dark, or low resolution to identify
+	ErrorCodeImageQuality BulkImportErrorCode = "image_quality"
+
+	// ErrorCodeNoMatch - Card detected but couldn't be matched to any card in the database
+	ErrorCodeNoMatch BulkImportErrorCode = "no_match"
+
+	// ErrorCodeAPIError - Gemini API unavailable (rate limit, network error, etc.)
+	ErrorCodeAPIError BulkImportErrorCode = "api_error"
+
+	// ErrorCodeTimeout - Identification took too long
+	ErrorCodeTimeout BulkImportErrorCode = "timeout"
+
+	// ErrorCodeFileError - Failed to read or process the image file
+	ErrorCodeFileError BulkImportErrorCode = "file_error"
+
+	// ErrorCodeServiceUnavailable - Gemini service is not configured
+	ErrorCodeServiceUnavailable BulkImportErrorCode = "service_unavailable"
+)
+
 // BulkImportJob represents a bulk import session
 type BulkImportJob struct {
 	ID             string              `json:"id" gorm:"primaryKey"`
@@ -57,7 +87,8 @@ type BulkImportItem struct {
 	Condition        Condition            `json:"condition" gorm:"default:'NM'"`
 	PrintingType     PrintingType         `json:"printing_type" gorm:"default:'Normal'"`
 	Language         CardLanguage         `json:"language,omitempty"`
-	ErrorMessage     string               `json:"error_message,omitempty"`
+	ErrorCode        BulkImportErrorCode  `json:"error_code,omitempty"`    // Categorized error code for frontend display
+	ErrorMessage     string               `json:"error_message,omitempty"` // Detailed error message for debugging
 	CreatedAt        time.Time            `json:"created_at"`
 	UpdatedAt        time.Time            `json:"updated_at"`
 

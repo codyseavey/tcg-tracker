@@ -226,6 +226,56 @@ function getStatusIcon(status) {
   }
 }
 
+// Error code display configuration
+// Maps backend error codes to user-friendly messages and suggestions
+const errorCodeConfig = {
+  no_card_visible: {
+    icon: '🖼️',
+    title: 'No card detected',
+    suggestion: 'Make sure the card fills most of the frame and is clearly visible.'
+  },
+  image_quality: {
+    icon: '📷',
+    title: 'Image quality issue',
+    suggestion: 'Try taking a clearer photo with better lighting and focus.'
+  },
+  no_match: {
+    icon: '🔍',
+    title: 'Card not found',
+    suggestion: 'The card was detected but couldn\'t be matched. Use "Search manually" to find it.'
+  },
+  api_error: {
+    icon: '🌐',
+    title: 'Service error',
+    suggestion: 'The identification service is temporarily unavailable. This item can be retried later.'
+  },
+  timeout: {
+    icon: '⏱️',
+    title: 'Timed out',
+    suggestion: 'Identification took too long. Try again or search manually.'
+  },
+  file_error: {
+    icon: '📁',
+    title: 'File error',
+    suggestion: 'Could not read the image file. Try re-uploading.'
+  },
+  service_unavailable: {
+    icon: '🔧',
+    title: 'Service not configured',
+    suggestion: 'Card identification is not available. Contact the administrator.'
+  }
+}
+
+// Get user-friendly error display info
+function getErrorInfo(item) {
+  const code = item.error_code || 'no_match'
+  const config = errorCodeConfig[code] || errorCodeConfig.no_match
+  return {
+    ...config,
+    details: item.error_message || ''
+  }
+}
+
 // Get image URL for bulk import images
 function getBulkImportImageUrl(imagePath) {
   if (!imagePath) return ''
@@ -355,11 +405,20 @@ function getBulkImportImageUrl(imagePath) {
 
     <!-- Phase 2: Processing -->
     <div v-if="showProgress" class="space-y-6">
+      <!-- Resuming indicator -->
+      <div v-if="store.resuming" class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 flex items-center gap-3">
+        <svg class="animate-spin h-5 w-5 text-blue-600 dark:text-blue-400" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+        <span class="text-blue-700 dark:text-blue-300 font-medium">Resuming... Fetching latest progress</span>
+      </div>
+      
       <!-- Progress bar -->
       <div class="bg-white dark:bg-gray-800 rounded-lg p-6 shadow">
         <div class="flex justify-between items-center mb-2">
           <span class="text-lg font-medium text-gray-900 dark:text-white">
-            Processing: {{ store.job?.processed_items || 0 }} / {{ store.job?.total_items || 0 }}
+            Processing: {{ store.displayProcessed }} / {{ store.displayTotal }}
           </span>
           <span class="text-lg font-bold text-blue-600 dark:text-blue-400">
             {{ store.progress }}%
@@ -377,7 +436,7 @@ function getBulkImportImageUrl(imagePath) {
       </div>
 
       <!-- Status summary -->
-      <div class="grid grid-cols-4 gap-4">
+      <div v-if="!store.resuming" class="grid grid-cols-4 gap-4">
         <div class="bg-white dark:bg-gray-800 rounded-lg p-4 text-center shadow">
           <div class="text-2xl font-bold text-green-600">{{ store.identifiedCount }}</div>
           <div class="text-sm text-gray-500 dark:text-gray-400">Identified</div>
@@ -391,13 +450,13 @@ function getBulkImportImageUrl(imagePath) {
           <div class="text-sm text-gray-500 dark:text-gray-400">Pending</div>
         </div>
         <div class="bg-white dark:bg-gray-800 rounded-lg p-4 text-center shadow">
-          <div class="text-2xl font-bold text-red-600">{{ store.failedCount }}</div>
-          <div class="text-sm text-gray-500 dark:text-gray-400">Failed</div>
+          <div class="text-2xl font-bold text-amber-600">{{ store.failedCount }}</div>
+          <div class="text-sm text-gray-500 dark:text-gray-400">Needs Attention</div>
         </div>
       </div>
 
       <!-- Item list -->
-      <div class="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
+      <div v-if="!store.resuming && store.job?.items" class="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden">
         <div class="max-h-96 overflow-y-auto">
           <div
             v-for="item in store.job?.items"
@@ -426,8 +485,9 @@ function getBulkImportImageUrl(imagePath) {
             <span v-if="item.status === 'identified'" class="text-sm text-gray-900 dark:text-white font-medium">
               {{ item.card_name }}
             </span>
-            <span v-else-if="item.status === 'failed'" class="text-sm text-red-600 dark:text-red-400">
-              {{ item.error_message || 'Failed' }}
+            <span v-else-if="item.status === 'failed'" class="text-sm text-amber-600 dark:text-amber-400 flex items-center gap-1">
+              <span>{{ getErrorInfo(item).icon }}</span>
+              <span>{{ getErrorInfo(item).title }}</span>
             </span>
             <span v-else class="text-sm text-gray-500 dark:text-gray-400">
               {{ item.status === 'processing' ? 'Identifying...' : 'Waiting...' }}
@@ -665,14 +725,14 @@ function getBulkImportImageUrl(imagePath) {
       <!-- Failed cards -->
       <div v-if="store.failedItems.length > 0" class="space-y-4">
         <h3 class="text-lg font-medium text-red-600 dark:text-red-400">
-          Failed ({{ store.failedCount }})
+          Needs Attention ({{ store.failedCount }})
         </h3>
         
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           <div
             v-for="item in store.failedItems"
             :key="item.id"
-            class="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden border-l-4 border-red-500"
+            class="bg-white dark:bg-gray-800 rounded-lg shadow overflow-hidden border-l-4 border-amber-500"
           >
             <div class="flex gap-3 p-3">
               <!-- Scanned image -->
@@ -685,17 +745,38 @@ function getBulkImportImageUrl(imagePath) {
                 />
               </div>
               
-              <!-- Error info -->
-              <div class="flex-1">
+              <!-- Error info with icon and suggestion -->
+              <div class="flex-1 min-w-0">
                 <p class="text-sm text-gray-900 dark:text-white font-medium truncate">
                   {{ item.original_filename }}
                 </p>
-                <p class="text-sm text-red-600 dark:text-red-400 mt-1">
-                  {{ item.error_message || 'Could not identify card' }}
+                
+                <!-- Error category with icon -->
+                <div class="flex items-center gap-1.5 mt-1">
+                  <span class="text-base">{{ getErrorInfo(item).icon }}</span>
+                  <span class="text-sm font-medium text-amber-700 dark:text-amber-400">
+                    {{ getErrorInfo(item).title }}
+                  </span>
+                </div>
+                
+                <!-- Suggestion -->
+                <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  {{ getErrorInfo(item).suggestion }}
                 </p>
+                
+                <!-- Show details toggle for debugging -->
+                <details v-if="getErrorInfo(item).details" class="mt-1">
+                  <summary class="text-xs text-gray-400 dark:text-gray-500 cursor-pointer hover:text-gray-600 dark:hover:text-gray-300">
+                    Show details
+                  </summary>
+                  <p class="text-xs text-gray-400 dark:text-gray-500 mt-0.5 break-words">
+                    {{ getErrorInfo(item).details }}
+                  </p>
+                </details>
+                
                 <button
                   @click="openCardSearch(item)"
-                  class="mt-2 text-sm text-blue-600 dark:text-blue-400 hover:underline"
+                  class="mt-2 text-sm text-blue-600 dark:text-blue-400 hover:underline font-medium"
                 >
                   Search manually
                 </button>
