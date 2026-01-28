@@ -758,6 +758,55 @@ func (s *JustTCGService) FetchSetTCGPlayerIDs(setID string) (*SetTCGPlayerIDMap,
 	return result, nil
 }
 
+// DebugSearchCard searches JustTCG for a card by name and logs the results
+func (s *JustTCGService) DebugSearchCard(name string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := s.rateLimiter.Wait(ctx); err != nil {
+		log.Printf("JustTCG debug search: rate limit error: %v", err)
+		return
+	}
+	if !s.checkDailyLimit() {
+		log.Printf("JustTCG debug search: quota exceeded")
+		return
+	}
+
+	params := url.Values{}
+	params.Set("game", "pokemon")
+	params.Set("search", name)
+	params.Set("limit", "50")
+
+	reqURL := fmt.Sprintf("%s/cards?%s", s.baseURL, params.Encode())
+	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
+	if err != nil {
+		log.Printf("JustTCG debug search: request error: %v", err)
+		return
+	}
+	s.setHeaders(req)
+
+	resp, err := s.client.Do(req)
+	if err != nil {
+		log.Printf("JustTCG debug search: http error: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	var apiResp JustTCGResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
+		log.Printf("JustTCG debug search: decode error: %v", err)
+		return
+	}
+
+	s.updateRemaining(apiResp.Metadata.APIDailyRequestsRemaining)
+
+	log.Printf("JustTCG debug search for %q: found %d cards", name, len(apiResp.Data))
+	for _, card := range apiResp.Data {
+		if strings.Contains(strings.ToLower(card.Name), strings.ToLower(name)) {
+			log.Printf("  - %s | #%s | set: %s | tcgplayerId: %s", card.Name, card.Number, card.Set, card.TCGPlayerID)
+		}
+	}
+}
+
 // FetchAllPokemonSets fetches the list of all Pokemon sets from JustTCG
 func (s *JustTCGService) FetchAllPokemonSets() ([]string, error) {
 	// Wait for rate limiter

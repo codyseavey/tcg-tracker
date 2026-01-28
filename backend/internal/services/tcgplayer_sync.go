@@ -221,6 +221,8 @@ func (s *TCGPlayerSyncService) SyncMissingTCGPlayerIDs(ctx context.Context) (*Sy
 							log.Printf("TCGPlayerSync debug: Found name key %q -> %s", k, v)
 						}
 					}
+					// Search JustTCG for Machamp to see where it's listed
+					s.justTCG.DebugSearchCard("Machamp")
 				}
 				result.CardsSkipped++
 			}
