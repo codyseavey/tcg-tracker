@@ -28,9 +28,8 @@ const (
 	maxTurns             = 15 // Max conversation turns before giving up
 
 	// Thorough mode: optimized for accuracy (background bulk import)
-	// Note: Using same model but with more turns and retry logic for better accuracy
-	// When newer models become available, update this constant
-	geminiModelThorough   = "gemini-2.0-flash"
+	// Uses gemini-3-flash-preview for better reasoning on difficult cards
+	geminiModelThorough   = "gemini-3-flash-preview"
 	geminiTimeoutThorough = 180 * time.Second // 3 minutes for thorough analysis
 	maxTurnsThorough      = 25                // More turns for difficult cards
 	minConfidenceThorough = 0.8               // Retry if confidence below this
