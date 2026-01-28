@@ -447,6 +447,111 @@ func (h *BulkImportHandler) ConfirmJob(c *gin.Context) {
 	})
 }
 
+// AddImages adds more images to an existing job (for chunked uploads)
+// POST /api/bulk-import/jobs/:id/images
+func (h *BulkImportHandler) AddImages(c *gin.Context) {
+	jobID := c.Param("id")
+
+	// Verify job exists and is still accepting images (pending or processing status)
+	job, err := h.worker.GetJob(jobID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "job not found"})
+		return
+	}
+
+	if job.Status != models.BulkImportStatusPending && job.Status != models.BulkImportStatusProcessing {
+		c.JSON(http.StatusConflict, gin.H{
+			"error": "cannot add images to a completed or cancelled job",
+		})
+		return
+	}
+
+	// Parse multipart form
+	if err := c.Request.ParseMultipartForm(maxFileSize * maxBulkImportFiles); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "failed to parse form: " + err.Error()})
+		return
+	}
+
+	form := c.Request.MultipartForm
+	if form == nil || form.File == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no files uploaded"})
+		return
+	}
+
+	files := form.File["images"]
+	if len(files) == 0 {
+		files = form.File["images[]"]
+	}
+	if len(files) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "no images found in upload"})
+		return
+	}
+
+	// Check total items won't exceed limit
+	currentItems := len(job.Items)
+	if currentItems+len(files) > maxBulkImportFiles {
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error": fmt.Sprintf("too many files: maximum is %d (current: %d, adding: %d)",
+				maxBulkImportFiles, currentItems, len(files)),
+		})
+		return
+	}
+
+	// Process each file
+	successCount := 0
+	var errors []string
+
+	for _, fileHeader := range files {
+		if fileHeader.Size > maxFileSize {
+			errors = append(errors, fmt.Sprintf("%s: file too large (max %dMB)", fileHeader.Filename, maxFileSize/(1024*1024)))
+			continue
+		}
+
+		file, err := fileHeader.Open()
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("%s: failed to open file", fileHeader.Filename))
+			continue
+		}
+
+		imageData, err := io.ReadAll(file)
+		file.Close()
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("%s: failed to read file", fileHeader.Filename))
+			continue
+		}
+
+		contentType := http.DetectContentType(imageData)
+		if contentType != "image/jpeg" && contentType != "image/png" && contentType != "image/gif" && contentType != "image/webp" {
+			errors = append(errors, fmt.Sprintf("%s: not a valid image format", fileHeader.Filename))
+			continue
+		}
+
+		imagePath, err := h.worker.SaveImage(imageData, fileHeader.Filename)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("%s: failed to save image", fileHeader.Filename))
+			continue
+		}
+
+		_, err = h.worker.AddItemToJob(job.ID, imagePath, fileHeader.Filename)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("%s: failed to create item", fileHeader.Filename))
+			continue
+		}
+
+		successCount++
+	}
+
+	// Update job total items
+	newTotal := currentItems + successCount
+	database.GetDB().Model(job).Update("total_items", newTotal)
+
+	c.JSON(http.StatusOK, gin.H{
+		"added":       successCount,
+		"total_items": newTotal,
+		"errors":      errors,
+	})
+}
+
 // DeleteJob cancels and deletes a bulk import job
 // DELETE /api/bulk-import/jobs/:id
 func (h *BulkImportHandler) DeleteJob(c *gin.Context) {

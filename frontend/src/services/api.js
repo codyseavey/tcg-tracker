@@ -263,25 +263,92 @@ export const authService = {
   }
 }
 
+// Cloudflare free tier limits uploads to 100MB
+// We chunk uploads into ~20 files per request to stay well under the limit
+const CHUNK_SIZE = 20
+
 export const bulkImportService = {
   /**
    * Create a new bulk import job with uploaded images
+   * Uses chunked uploads to work around Cloudflare's 100MB limit
    * @param {FileList|File[]} files - Array of image files to upload
-   * @param {Function} onProgress - Optional progress callback (current, total)
+   * @param {Function} onProgress - Optional progress callback (loaded, total)
    * @returns {Promise<Object>} - { job_id, total_items, status, errors }
    */
   async createJob(files, onProgress = null) {
-    const formData = new FormData()
-    for (const file of files) {
-      formData.append('images', file)
+    const fileArray = Array.from(files)
+    const totalFiles = fileArray.length
+    
+    // Calculate total size for progress tracking
+    const totalSize = fileArray.reduce((sum, f) => sum + f.size, 0)
+    let uploadedSize = 0
+    let jobId = null
+    const allErrors = []
+
+    // Split files into chunks
+    const chunks = []
+    for (let i = 0; i < totalFiles; i += CHUNK_SIZE) {
+      chunks.push(fileArray.slice(i, i + CHUNK_SIZE))
     }
 
-    const response = await api.post('/bulk-import/jobs', formData, {
+    // Upload first chunk to create the job
+    const firstChunkResult = await this._uploadChunk(chunks[0], null, (loaded, _chunkTotal) => {
+      if (onProgress) {
+        onProgress(loaded, totalSize)
+      }
+    })
+    
+    jobId = firstChunkResult.job_id
+    uploadedSize = chunks[0].reduce((sum, f) => sum + f.size, 0)
+    if (firstChunkResult.errors?.length) {
+      allErrors.push(...firstChunkResult.errors)
+    }
+
+    // Upload remaining chunks
+    for (let i = 1; i < chunks.length; i++) {
+      const chunk = chunks[i]
+      const chunkSize = chunk.reduce((sum, f) => sum + f.size, 0)
+      
+      const result = await this._uploadChunk(chunk, jobId, (loaded, _chunkTotal) => {
+        if (onProgress) {
+          onProgress(uploadedSize + loaded, totalSize)
+        }
+      })
+      
+      uploadedSize += chunkSize
+      if (result.errors?.length) {
+        allErrors.push(...result.errors)
+      }
+    }
+
+    return {
+      job_id: jobId,
+      total_items: totalFiles - allErrors.length,
+      status: 'pending',
+      errors: allErrors
+    }
+  },
+
+  /**
+   * Upload a chunk of files (internal helper)
+   * @private
+   */
+  async _uploadChunk(files, jobId, onProgress) {
+    const formData = new FormData()
+    let chunkSize = 0
+    for (const file of files) {
+      formData.append('images', file)
+      chunkSize += file.size
+    }
+
+    const url = jobId ? `/bulk-import/jobs/${jobId}/images` : '/bulk-import/jobs'
+    const response = await api.post(url, formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
-      timeout: 300000, // 5 minute timeout for large uploads
+      timeout: 300000, // 5 minutes per chunk
       onUploadProgress: (progressEvent) => {
-        if (onProgress && progressEvent.total) {
-          onProgress(progressEvent.loaded, progressEvent.total)
+        if (onProgress) {
+          const total = progressEvent.total || chunkSize
+          onProgress(progressEvent.loaded, total)
         }
       }
     })

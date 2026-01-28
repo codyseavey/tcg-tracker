@@ -126,6 +126,7 @@ func SetupRouter(scryfallService *services.ScryfallService, pokemonService *serv
 			bulkImport.POST("/jobs", bulkImportHandler.CreateJob)
 			bulkImport.GET("/jobs", bulkImportHandler.GetCurrentJob)
 			bulkImport.GET("/jobs/:id", bulkImportHandler.GetJob)
+			bulkImport.POST("/jobs/:id/images", bulkImportHandler.AddImages) // Chunked upload support
 			bulkImport.PUT("/jobs/:id/items/:itemId", bulkImportHandler.UpdateItem)
 			bulkImport.POST("/jobs/:id/confirm", bulkImportHandler.ConfirmJob)
 			bulkImport.DELETE("/jobs/:id", bulkImportHandler.DeleteJob)
